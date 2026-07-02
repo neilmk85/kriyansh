@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "salonos-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4455", "--directory", "/tmp/salonos"],
+      "port": 4455
+    },
+    {
+      "name": "salonos-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/nilesh/development/kriyansh/frontend",
+      "port": 5173,
+      "autoPort": false
+    }
+  ]
+}
