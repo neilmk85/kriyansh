@@ -84,8 +84,8 @@ func (a *App) CustomerAppointments(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, DATE_FORMAT(a.start_at,'%Y-%m-%dT%H:%i:%sZ'), DATE_FORMAT(a.end_at,'%Y-%m-%dT%H:%i:%sZ'),
 		       a.status, COALESCE(a.notes,''),
 		       CONCAT(u.first_name,' ',u.last_name),
-		       GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),
-		       COALESCE(SUM(s.price),0)
+		       GROUP_CONCAT(COALESCE(s.name,'') ORDER BY s.name SEPARATOR ', '),
+		       COALESCE(SUM(aps.price),0)
 		FROM appointments a
 		JOIN staff_profiles sp ON sp.id = a.staff_id
 		JOIN users u ON u.id = sp.user_id

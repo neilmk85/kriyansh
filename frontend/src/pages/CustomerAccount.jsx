@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   User, Activity, Wallet, MessageSquare, Heart, FileText, Settings,
@@ -421,18 +421,53 @@ function ManageModal({ item, onClose, onCancel, onReschedule }) {
   )
 }
 
+function toDisplayDate(isoStr) {
+  const d = new Date(isoStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+function toDisplayTime(isoStr) {
+  const d = new Date(isoStr)
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+function apiApptToItem(a) {
+  const durationMs = new Date(a.end_at) - new Date(a.start_at)
+  return {
+    id: a.id,
+    type: 'appointment',
+    service: a.services ? a.services.split(', ')[0] : 'Service',
+    services: a.services ? a.services.split(', ') : [],
+    staff: a.staff_name,
+    date: toDisplayDate(a.start_at),
+    time: toDisplayTime(a.start_at),
+    status: a.status === 'no_show' ? 'no-show' : a.status,
+    amount: a.total,
+    duration: Math.round(durationMs / 60000),
+    reviewed: false,
+  }
+}
+
 function ActivitySection({ navigate, onSave }) {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [showSearch, setShowSearch] = useState(false)
-  const [items, setItems] = useState(() => {
-    const saved = JSON.parse(localStorage.getItem('ks_bookings') || '[]')
-    const existingIds = new Set(ALL_ACTIVITY.map(a => a.id))
-    const fresh = saved.filter(b => !existingIds.has(b.id))
-    return [...fresh, ...ALL_ACTIVITY]
-  })
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
   const [reviewItem, setReviewItem] = useState(null)
   const [manageItem, setManageItem] = useState(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) { setLoading(false); return }
+    fetch('/api/customer/appointments', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setItems(data.map(apiApptToItem))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   const upcoming = items.filter(a => a.status === 'confirmed')
   const past      = items.filter(a => a.status !== 'confirmed')
@@ -443,29 +478,14 @@ function ActivitySection({ navigate, onSave }) {
       .filter(a => !search || a.service.toLowerCase().includes(search.toLowerCase()))
   }
 
-  const staticIds = new Set(ALL_ACTIVITY.map(a => a.id))
-
-  function persistNonStatic(updated) {
-    const lsBookings = updated.filter(a => !staticIds.has(a.id))
-    localStorage.setItem('ks_bookings', JSON.stringify(lsBookings))
-  }
-
   function handleCancel(id) {
-    setItems(prev => {
-      const updated = prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a)
-      persistNonStatic(updated)
-      return updated
-    })
+    setItems(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a))
     setManageItem(null)
   }
 
   function handleReschedule(id, yr, mo, day, time) {
     const dateStr = new Date(yr, mo, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    setItems(prev => {
-      const updated = prev.map(a => a.id === id ? { ...a, date: dateStr, time } : a)
-      persistNonStatic(updated)
-      return updated
-    })
+    setItems(prev => prev.map(a => a.id === id ? { ...a, date: dateStr, time } : a))
     setManageItem(null)
     onSave('Appointment rescheduled')
   }
@@ -588,7 +608,7 @@ function ActivitySection({ navigate, onSave }) {
     )
   }
 
-  const isEmpty = upcomingFiltered.length === 0 && pastFiltered.length === 0
+  const isEmpty = !loading && upcomingFiltered.length === 0 && pastFiltered.length === 0
 
   return (
     <div className="space-y-5">

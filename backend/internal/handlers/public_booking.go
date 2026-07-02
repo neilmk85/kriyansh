@@ -275,16 +275,15 @@ func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 
 	// Link services
 	for _, svcID := range req.ServiceIDs {
-		var name string
 		var price float64
 		var dur int
 		_ = a.DB.QueryRowContext(r.Context(),
-			`SELECT name, price, duration_min FROM services WHERE id=?`, svcID).
-			Scan(&name, &price, &dur)
+			`SELECT price, duration_min FROM services WHERE id=?`, svcID).
+			Scan(&price, &dur)
 		a.DB.ExecContext(r.Context(),
-			`INSERT INTO appointment_services (appointment_id, service_id, service_name, price, duration_min)
-			 VALUES (?, ?, ?, ?, ?)`,
-			apptID, svcID, name, price, dur)
+			`INSERT INTO appointment_services (appointment_id, service_id, price, duration_min)
+			 VALUES (?, ?, ?, ?)`,
+			apptID, svcID, price, dur)
 	}
 
 	// Send confirmation SMS
