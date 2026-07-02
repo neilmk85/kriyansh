@@ -1206,7 +1206,7 @@ export default function CustomerAccount() {
     <div className="min-h-screen bg-[#F8F9FA]">
       {toast && <Toast message={toast} />}
 
-      <div className="max-w-5xl mx-auto px-4 py-6 flex gap-6">
+      <div className="max-w-7xl mx-auto px-6 py-6 flex gap-8">
 
         {/* ── Sidebar ────────────────────────────────────── */}
         <aside className="w-56 shrink-0">
