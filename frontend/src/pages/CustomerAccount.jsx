@@ -87,12 +87,60 @@ function Toggle({ on, onChange }) {
 
 /* ── Sections ───────────────────────────────────────────────── */
 function ProfileSection({ onSave }) {
-  const [form, setForm] = useState(USER)
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', gender: '' })
+  const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const rawPhone = USER.phone.replace(/\D/g, '').slice(-4)
-  const namePart = USER.firstName.slice(0, 4).toUpperCase().padEnd(4, 'X')
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setForm({
+        firstName: d.first_name || '',
+        lastName:  d.last_name  || '',
+        email:     d.email      || '',
+        phone:     d.phone      || '',
+        dob:       d.dob        || '',
+        gender:    d.gender     || '',
+      }))
+      .catch(() => {})
+  }, [])
+
+  async function handleSave() {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/customer/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          first_name: form.firstName,
+          last_name:  form.lastName,
+          email:      form.email,
+          gender:     form.gender,
+          dob:        form.dob,
+          sms_consent: true,
+        }),
+      })
+      if (res.ok) {
+        const stored = JSON.parse(localStorage.getItem('salonos_customer') || '{}')
+        localStorage.setItem('salonos_customer', JSON.stringify({
+          ...stored, first_name: form.firstName, last_name: form.lastName, email: form.email,
+        }))
+        onSave('Changes saved')
+      } else {
+        onSave('Failed to save')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const rawPhone = form.phone.replace(/\D/g, '').slice(-4)
+  const namePart = (form.firstName.slice(0, 4) || 'USER').toUpperCase().padEnd(4, 'X')
   const referralCode = namePart + rawPhone
 
   function handleCopy() {
@@ -131,20 +179,22 @@ function ProfileSection({ onSave }) {
           { label: 'First name', key: 'firstName', type: 'text', col: 1 },
           { label: 'Last name',  key: 'lastName',  type: 'text', col: 1 },
           { label: 'Email',      key: 'email',     type: 'email', col: 2 },
-          { label: 'Phone',      key: 'phone',     type: 'tel', col: 2 },
+          { label: 'Phone',      key: 'phone',     type: 'tel', col: 2, readOnly: true },
           { label: 'Date of birth', key: 'dob',   type: 'date', col: 1 },
-          { label: 'Gender',     key: 'gender',    type: 'select', col: 1, options: ['Male','Female','Non-binary','Prefer not to say'] },
+          { label: 'Gender',     key: 'gender',    type: 'select', col: 1, options: ['','Male','Female','Non-binary','Prefer not to say'] },
         ].map(f => (
           <div key={f.key} className={f.col === 2 ? 'col-span-2' : ''}>
             <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">{f.label}</label>
             {f.type === 'select' ? (
               <select value={form[f.key]} onChange={e => set(f.key, e.target.value)}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] text-slate-800 bg-white focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200">
-                {f.options.map(o => <option key={o}>{o}</option>)}
+                {f.options.map(o => <option key={o} value={o}>{o || 'Select…'}</option>)}
               </select>
             ) : (
-              <input type={f.type} value={form[f.key]} onChange={e => set(f.key, e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] text-slate-800 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200" />
+              <input type={f.type} value={form[f.key]} onChange={e => !f.readOnly && set(f.key, e.target.value)}
+                readOnly={f.readOnly}
+                className={`w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] focus:outline-none transition-all
+                  ${f.readOnly ? 'text-slate-400 bg-slate-50 cursor-not-allowed' : 'text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200'}`} />
             )}
           </div>
         ))}
@@ -166,10 +216,10 @@ function ProfileSection({ onSave }) {
         </div>
       </div>
 
-      <button onClick={() => onSave('Changes saved')}
-        className="px-6 py-2.5 rounded-xl text-white text-[13px] font-bold transition-opacity hover:opacity-90"
+      <button onClick={handleSave} disabled={saving}
+        className="px-6 py-2.5 rounded-xl text-white text-[13px] font-bold transition-opacity hover:opacity-90 disabled:opacity-50"
         style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-        Save changes
+        {saving ? 'Saving…' : 'Save changes'}
       </button>
     </div>
   )
