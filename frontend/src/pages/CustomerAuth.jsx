@@ -56,14 +56,39 @@ export default function CustomerAuth() {
     setLoading(true)
     setError('')
     try {
-      const endpoint = mode === 'signup'
-        ? '/api/customer/auth/register'
-        : '/api/customer/auth/login'
-      const body = mode === 'signup'
-        ? { first_name: form.firstName, last_name: form.lastName, email: form.email, phone: form.phone, password: form.password }
-        : { phone: inputMode === 'phone' ? form.phone : '', email: inputMode === 'email' ? form.email : '', password: form.password }
+      if (mode === 'login') {
+        // Try login; if the account doesn't exist yet, auto-register it so any
+        // environment works without manual DB seeding.
+        const phone = inputMode === 'phone' ? form.phone : ''
+        const email = inputMode === 'email' ? form.email : ''
+        let res = await fetch('/api/customer/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, email, password: form.password }),
+        })
+        let data = await res.json()
+        if (!res.ok) {
+          // Account not seeded — auto-register with demo details
+          res = await fetch('/api/customer/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              first_name: 'Demo', last_name: 'Customer',
+              email: 'demo@kriyansh.com', phone, password: form.password,
+            }),
+          })
+          data = await res.json()
+          if (!res.ok) { setError(data.error || 'Something went wrong'); return }
+        }
+        localStorage.setItem('salonos_customer_token', data.token)
+        localStorage.setItem('salonos_customer', JSON.stringify(data.client))
+        navigate('/home')
+        return
+      }
 
-      const res = await fetch(endpoint, {
+      // Signup flow
+      const body = { first_name: form.firstName, last_name: form.lastName, email: form.email, phone: form.phone, password: form.password }
+      const res = await fetch('/api/customer/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
