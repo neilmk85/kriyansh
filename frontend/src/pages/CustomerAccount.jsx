@@ -86,7 +86,7 @@ function Toggle({ on, onChange }) {
 }
 
 /* ── Sections ───────────────────────────────────────────────── */
-function ProfileSection({ onSave }) {
+function ProfileSection({ onSave, onRefresh }) {
   const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', gender: '' })
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -130,6 +130,7 @@ function ProfileSection({ onSave }) {
         localStorage.setItem('salonos_customer', JSON.stringify({
           ...stored, first_name: form.firstName, last_name: form.lastName, email: form.email,
         }))
+        onRefresh?.()
         onSave('Changes saved')
       } else {
         onSave('Failed to save')
@@ -1243,6 +1244,11 @@ export default function CustomerAccount() {
   const [searchParams, setSearchParams] = useSearchParams()
   const section = searchParams.get('tab') || 'profile'
   const [toast, setToast] = useState(null)
+  const [customer, setCustomer] = useState(() => JSON.parse(localStorage.getItem('salonos_customer') || '{}'))
+
+  function refreshCustomer() {
+    setCustomer(JSON.parse(localStorage.getItem('salonos_customer') || '{}'))
+  }
 
   function setSection(s) { setSearchParams({ tab: s }) }
 
@@ -1265,10 +1271,12 @@ export default function CustomerAccount() {
               <ArrowLeft size={16} />
             </button>
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[12px] font-black shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>N</div>
+              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
+              {(customer.first_name || 'U')[0].toUpperCase()}
+            </div>
             <div className="min-w-0">
-              <div className="text-[13px] font-bold text-slate-900 truncate">Nilesh Kakade</div>
-              <div className="text-[11px] text-slate-400 truncate">+91 9999999999</div>
+              <div className="text-[13px] font-bold text-slate-900 truncate">{customer.first_name} {customer.last_name}</div>
+              <div className="text-[11px] text-slate-400 truncate">{customer.phone}</div>
             </div>
           </div>
 
@@ -1297,7 +1305,7 @@ export default function CustomerAccount() {
 
         {/* ── Content ────────────────────────────────────── */}
         <main className="flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm p-6 min-h-[600px]">
-          {section === 'profile'    && <ProfileSection    onSave={showToast} />}
+          {section === 'profile'    && <ProfileSection    onSave={showToast} onRefresh={refreshCustomer} />}
           {section === 'activity'   && <ActivitySection   navigate={navigate} onSave={showToast} />}
           {section === 'wallet'     && <WalletSection     onSave={showToast} />}
           {section === 'messages'   && <MessagesSection   />}
