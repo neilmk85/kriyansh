@@ -38,10 +38,10 @@ export default function CustomerAuth() {
   const [params]        = useSearchParams()
   const initialMode     = params.get('mode') === 'signup' ? 'signup' : 'login'
   const [mode, setMode] = useState(initialMode)
-  const [step, setStep] = useState('email')
+  const [step, setStep] = useState(initialMode === 'login' ? 'password' : 'email')
   const [inputMode, setInputMode] = useState('phone')
   const [showPass, setShowPass] = useState(false)
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' })
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '9999999999', password: initialMode === 'login' ? 'test123' : '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
