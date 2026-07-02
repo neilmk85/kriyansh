@@ -109,6 +109,10 @@ function Stars({ count = 5, filled = 5, size = 14 }) {
 
 export default function CustomerHome() {
   const navigate = useNavigate()
+  const customer = JSON.parse(localStorage.getItem('salonos_customer') || '{}')
+  const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Guest'
+  const customerInitial = (customer.first_name || 'G')[0].toUpperCase()
+  const customerPhone = customer.phone || ''
   const [activeTab, setActiveTab] = useState('services')
   const [activeCategory, setActiveCategory] = useState('All')
   const [search, setSearch] = useState('')
@@ -182,7 +186,7 @@ export default function CustomerHome() {
                 className="flex items-center gap-1.5 ml-1 pl-1 pr-2 py-1 rounded-full border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all bg-white">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[12px] font-black"
                   style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-                  N
+                  {customerInitial}
                 </div>
                 <ChevronDown size={13} className={`text-slate-500 transition-transform ${avatarOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -191,8 +195,8 @@ export default function CustomerHome() {
                 <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 py-1">
                   {/* User info */}
                   <div className="px-4 py-3 border-b border-slate-100">
-                    <div className="text-[13px] font-bold text-slate-900">Nilesh Kakade</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">+91 9999999999</div>
+                    <div className="text-[13px] font-bold text-slate-900">{customerName}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{customerPhone}</div>
                   </div>
 
                   {/* Menu items */}
