@@ -233,25 +233,6 @@ export default function CustomerAuth() {
             </p>
           </div>
 
-          {/* Social buttons */}
-          <div className="flex flex-col gap-3 mb-7">
-            {socialBtns.map(({ label, Icon, bg, border, text }) => (
-              <button key={label}
-                className={`flex items-center gap-3 w-full px-5 py-3.5 rounded-2xl border-2 ${bg} ${border} ${text} text-[14px] font-semibold hover:shadow-md transition-all active:scale-[0.98]`}>
-                <Icon />
-                <span className="flex-1 text-center">{label}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Divider */}
-          <div className="flex items-center gap-4 mb-5">
-            <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-[13px] text-slate-400 font-medium">or</span>
-            <div className="flex-1 h-px bg-slate-200" />
-          </div>
-
-
           {/* Form */}
           <form onSubmit={handleContinue} noValidate className="space-y-4">
 
@@ -431,6 +412,24 @@ export default function CustomerAuth() {
               )}
             </button>
           </form>
+
+          {/* Divider */}
+          <div className="flex items-center gap-4 mt-6">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-[13px] text-slate-400 font-medium">or continue with</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
+
+          {/* Social buttons */}
+          <div className="flex flex-col gap-3 mt-4">
+            {socialBtns.map(({ label, Icon, bg, border, text }) => (
+              <button key={label}
+                className={`flex items-center gap-3 w-full px-5 py-3.5 rounded-2xl border-2 ${bg} ${border} ${text} text-[14px] font-semibold hover:shadow-md transition-all active:scale-[0.98]`}>
+                <Icon />
+                <span className="flex-1 text-center">{label}</span>
+              </button>
+            ))}
+          </div>
 
           {/* Mode toggle */}
           <p className="text-center text-[14px] text-slate-500 mt-6">
