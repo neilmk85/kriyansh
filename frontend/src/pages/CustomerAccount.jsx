@@ -548,9 +548,8 @@ function ActivitySection({ navigate, onSave }) {
     return (
       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden">
         <div className="flex items-start gap-3 p-4">
-          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0
-            ${a.type === 'membership' ? 'bg-violet-50' : a.type === 'gift' ? 'bg-pink-50' : 'bg-indigo-50'}`}>
-            <Icon size={16} className={a.type === 'membership' ? 'text-violet-500' : a.type === 'gift' ? 'text-pink-500' : 'text-indigo-500'} />
+          <div className="w-10 h-10 flex items-center justify-center shrink-0">
+            <Icon size={20} className={a.type === 'membership' ? 'text-violet-500' : a.type === 'gift' ? 'text-pink-500' : 'text-indigo-400'} />
           </div>
 
           <div className="flex-1 min-w-0">
