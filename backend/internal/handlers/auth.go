@@ -114,7 +114,6 @@ func (a *App) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) Me(w http.ResponseWriter, r *http.Request) {
-	// Claims already validated by middleware
 	type me struct {
 		ID        uint   `json:"id"`
 		SalonID   uint   `json:"salon_id"`
@@ -125,7 +124,6 @@ func (a *App) Me(w http.ResponseWriter, r *http.Request) {
 		Phone     string `json:"phone"`
 		AvatarURL string `json:"avatar_url"`
 	}
-	// Extract user_id from context via middleware
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	claims, _ := auth.ValidateToken(token, a.Secret)
 
@@ -140,4 +138,62 @@ func (a *App) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.JSON(w, http.StatusOK, u)
+}
+
+// PUT /api/auth/me — update own name / email / phone
+func (a *App) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	claims, _ := auth.ValidateToken(token, a.Secret)
+
+	var req struct {
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Phone     string `json:"phone"`
+	}
+	if err := a.Decode(r, &req); err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	_, err := a.DB.ExecContext(r.Context(),
+		`UPDATE users SET first_name=?, last_name=?, email=?, phone=? WHERE id=?`,
+		req.FirstName, req.LastName, req.Email, req.Phone, claims.UserID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// PUT /api/auth/password — change own password
+func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	claims, _ := auth.ValidateToken(token, a.Secret)
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := a.Decode(r, &req); err != nil || req.NewPassword == "" {
+		a.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	var hash string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT password_hash FROM users WHERE id=?`, claims.UserID).Scan(&hash); err != nil {
+		a.Error(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.CurrentPassword)); err != nil {
+		a.Error(w, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "hash error")
+		return
+	}
+	a.DB.ExecContext(r.Context(), `UPDATE users SET password_hash=? WHERE id=?`, string(newHash), claims.UserID)
+	a.JSON(w, http.StatusOK, map[string]string{"status": "password changed"})
 }

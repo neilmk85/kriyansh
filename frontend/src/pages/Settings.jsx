@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings2, Save, Star, MessageSquare } from 'lucide-react'
+import { Settings2, Save, Star, MessageSquare, User, Lock } from 'lucide-react'
 import api from '@/lib/api'
 
 const inp = 'w-full px-3 py-2.5 rounded-xl border border-slate-200 text-[13px] outline-none focus:border-[#0D9488] focus:ring-2 focus:ring-[#CCFBF1] transition-all bg-slate-50 focus:bg-white'
@@ -390,6 +390,126 @@ export default function Settings() {
           >
             <Save size={14} />
             {saveReview.isPending ? 'Saving…' : 'Save Review Settings'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── My Account ─────────────────────────────────────────────── */}
+      <MyAccount onToast={setToast} />
+    </div>
+  )
+}
+
+function MyAccount({ onToast }) {
+  const [profile, setProfile] = useState({ first_name: '', last_name: '', email: '', phone: '' })
+  const [pass, setPass] = useState({ current_password: '', new_password: '', confirm: '' })
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [savingPass, setSavingPass] = useState(false)
+  const [passError, setPassError] = useState('')
+
+  useEffect(() => {
+    api.get('/auth/me').then(r => setProfile({
+      first_name: r.data.first_name || '',
+      last_name:  r.data.last_name  || '',
+      email:      r.data.email      || '',
+      phone:      r.data.phone      || '',
+    })).catch(() => {})
+  }, [])
+
+  async function saveProfile() {
+    setSavingProfile(true)
+    try {
+      await api.put('/auth/me', profile)
+      onToast('Profile updated')
+    } catch {
+      onToast('Failed to save')
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  async function savePassword() {
+    setPassError('')
+    if (pass.new_password !== pass.confirm) { setPassError('New passwords do not match'); return }
+    if (pass.new_password.length < 6) { setPassError('Password must be at least 6 characters'); return }
+    setSavingPass(true)
+    try {
+      await api.put('/auth/password', { current_password: pass.current_password, new_password: pass.new_password })
+      setPass({ current_password: '', new_password: '', confirm: '' })
+      onToast('Password changed')
+    } catch (e) {
+      setPassError(e.response?.data?.error || 'Failed to change password')
+    } finally {
+      setSavingPass(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-8">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
+          <User size={16} className="text-indigo-500" />
+        </div>
+        <div>
+          <h3 className="text-[14px] font-bold text-slate-900">My Account</h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">Update your name, email and password</p>
+        </div>
+      </div>
+
+      {/* Profile fields */}
+      <div className="space-y-4">
+        <h4 className="text-[12px] font-semibold text-slate-500 uppercase tracking-widest">Personal Info</h4>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="First name">
+            <input className={inp} value={profile.first_name} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} />
+          </Field>
+          <Field label="Last name">
+            <input className={inp} value={profile.last_name} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} />
+          </Field>
+          <Field label="Email">
+            <input className={inp} type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} />
+          </Field>
+          <Field label="Phone">
+            <input className={inp} type="tel" value={profile.phone} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} />
+          </Field>
+        </div>
+        <div className="flex justify-end">
+          <button onClick={saveProfile} disabled={savingProfile}
+            className="flex items-center gap-2 px-5 py-2.5 text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] rounded-xl text-[13px] font-semibold disabled:opacity-60 transition-colors">
+            <Save size={14} />
+            {savingProfile ? 'Saving…' : 'Save Profile'}
+          </button>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-100" />
+
+      {/* Change password */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Lock size={13} className="text-slate-400" />
+          <h4 className="text-[12px] font-semibold text-slate-500 uppercase tracking-widest">Change Password</h4>
+        </div>
+        <div className="grid grid-cols-1 gap-4 max-w-sm">
+          <Field label="Current password">
+            <input className={inp} type="password" value={pass.current_password}
+              onChange={e => setPass(p => ({ ...p, current_password: e.target.value }))} />
+          </Field>
+          <Field label="New password">
+            <input className={inp} type="password" value={pass.new_password}
+              onChange={e => setPass(p => ({ ...p, new_password: e.target.value }))} />
+          </Field>
+          <Field label="Confirm new password">
+            <input className={inp} type="password" value={pass.confirm}
+              onChange={e => setPass(p => ({ ...p, confirm: e.target.value }))} />
+          </Field>
+        </div>
+        {passError && <p className="text-[12px] text-red-500">{passError}</p>}
+        <div className="flex justify-end">
+          <button onClick={savePassword} disabled={savingPass || !pass.current_password || !pass.new_password}
+            className="flex items-center gap-2 px-5 py-2.5 text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] rounded-xl text-[13px] font-semibold disabled:opacity-60 transition-colors">
+            <Lock size={14} />
+            {savingPass ? 'Saving…' : 'Change Password'}
           </button>
         </div>
       </div>

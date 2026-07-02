@@ -106,7 +106,9 @@ func main() {
 	auth := middleware.RequireAuth(cfg.JWTSecret)
 
 	// Me
-	mux.Handle("GET /api/auth/me", auth(http.HandlerFunc(app.Me)))
+	mux.Handle("GET /api/auth/me",        auth(http.HandlerFunc(app.Me)))
+	mux.Handle("PUT /api/auth/me",        auth(http.HandlerFunc(app.UpdateMe)))
+	mux.Handle("PUT /api/auth/password",  auth(http.HandlerFunc(app.ChangePassword)))
 
 	// Dashboard
 	mux.Handle("GET /api/dashboard", auth(http.HandlerFunc(app.Dashboard)))
