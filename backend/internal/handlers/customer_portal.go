@@ -87,7 +87,8 @@ func (a *App) CustomerAppointments(w http.ResponseWriter, r *http.Request) {
 		       GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),
 		       COALESCE(SUM(s.price),0)
 		FROM appointments a
-		JOIN users u ON u.id = a.staff_id
+		JOIN staff_profiles sp ON sp.id = a.staff_id
+		JOIN users u ON u.id = sp.user_id
 		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
 		LEFT JOIN services s ON s.id = aps.service_id
 		WHERE a.client_id=? AND a.salon_id=?`
