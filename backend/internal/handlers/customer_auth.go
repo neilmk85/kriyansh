@@ -166,3 +166,39 @@ func (a *App) CustomerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.JSON(w, http.StatusOK, customerAuthResp{Token: token, Client: client})
 }
+
+// PUT /api/customer/auth/password
+func (a *App) CustomerChangePassword(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := a.Decode(r, &req); err != nil || req.NewPassword == "" {
+		a.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		a.Error(w, http.StatusBadRequest, "password must be at least 6 characters")
+		return
+	}
+
+	var hash string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(password_hash,'') FROM clients WHERE id=?`, cc.ClientID).Scan(&hash); err != nil || hash == "" {
+		a.Error(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.CurrentPassword)); err != nil {
+		a.Error(w, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	a.DB.ExecContext(r.Context(), `UPDATE clients SET password_hash=? WHERE id=?`, string(newHash), cc.ClientID)
+	a.JSON(w, http.StatusOK, map[string]string{"status": "password changed"})
+}

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"salonos/internal/auth"
 	"salonos/internal/middleware"
@@ -166,7 +168,7 @@ func (a *App) CustomerLoyalty(w http.ResponseWriter, r *http.Request) {
 	}
 	var txns []txRow
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT COALESCE(lt.type,'earn'), lt.points, COALESCE(lt.notes,''), DATE_FORMAT(lt.created_at,'%Y-%m-%dT%H:%i:%sZ')
+		`SELECT COALESCE(lt.type,'earn'), lt.points, COALESCE(lt.note,''), DATE_FORMAT(lt.created_at,'%Y-%m-%dT%H:%i:%sZ')
 		 FROM loyalty_transactions lt
 		 WHERE lt.client_id=? AND lt.salon_id=?
 		 ORDER BY lt.created_at DESC LIMIT 10`, cc.ClientID, cc.SalonID)
@@ -219,4 +221,206 @@ func (a *App) CustomerLoyalty(w http.ResponseWriter, r *http.Request) {
 		"transactions":     txns,
 		"rewards":          rewards,
 	})
+}
+
+// PATCH /api/customer/appointments/{id}/cancel
+func (a *App) CustomerCancelAppointment(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+	id := r.PathValue("id")
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE appointments SET status='cancelled'
+		 WHERE id=? AND client_id=? AND salon_id=? AND start_at > NOW() AND status NOT IN ('cancelled','no_show','completed')`,
+		id, cc.ClientID, cc.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		a.Error(w, http.StatusBadRequest, "appointment cannot be cancelled")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// PUT /api/customer/appointments/{id}/reschedule
+func (a *App) CustomerRescheduleAppointment(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+	id := r.PathValue("id")
+
+	var req struct {
+		StartAt string `json:"start_at"` // RFC3339
+	}
+	if err := a.Decode(r, &req); err != nil || req.StartAt == "" {
+		a.Error(w, http.StatusBadRequest, "start_at is required")
+		return
+	}
+	newStart, err := time.Parse(time.RFC3339, req.StartAt)
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid start_at format")
+		return
+	}
+	if newStart.Before(time.Now()) {
+		a.Error(w, http.StatusBadRequest, "cannot reschedule to a past time")
+		return
+	}
+
+	// Get total duration from services
+	var totalMin int
+	_ = a.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(SUM(aps.duration_min),60) FROM appointment_services aps WHERE aps.appointment_id=?`, id).
+		Scan(&totalMin)
+	newEnd := newStart.Add(time.Duration(totalMin) * time.Minute)
+
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE appointments SET start_at=?, end_at=?
+		 WHERE id=? AND client_id=? AND salon_id=? AND start_at > NOW() AND status NOT IN ('cancelled','no_show','completed')`,
+		newStart.UTC(), newEnd.UTC(), id, cc.ClientID, cc.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		a.Error(w, http.StatusBadRequest, "appointment cannot be rescheduled")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]string{
+		"status":   "rescheduled",
+		"start_at": newStart.Format(time.RFC3339),
+		"end_at":   newEnd.Format(time.RFC3339),
+	})
+}
+
+// GET /api/customer/packages
+func (a *App) CustomerPackages(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+
+	type pkgRow struct {
+		ID            uint    `json:"id"`
+		Name          string  `json:"name"`
+		Description   string  `json:"description"`
+		PurchasePrice float64 `json:"purchase_price"`
+		PurchasedAt   string  `json:"purchased_at"`
+		ExpiresAt     string  `json:"expires_at"`
+		Status        string  `json:"status"`
+		Services      string  `json:"services"`
+		UsedCount     int     `json:"used_count"`
+		TotalQty      int     `json:"total_qty"`
+	}
+
+	rows, err := a.DB.QueryContext(r.Context(), `
+		SELECT cp.id, p.name, COALESCE(p.description,''), cp.purchase_price,
+		       DATE_FORMAT(cp.purchased_at,'%Y-%m-%dT%H:%i:%sZ'),
+		       COALESCE(DATE_FORMAT(cp.expires_at,'%Y-%m-%dT%H:%i:%sZ'),''),
+		       cp.status,
+		       COALESCE(GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', '),''),
+		       COUNT(DISTINCT pr.id),
+		       COALESCE(SUM(DISTINCT ps.qty),0)
+		FROM client_packages cp
+		JOIN packages p ON p.id=cp.package_id
+		LEFT JOIN package_services ps ON ps.package_id=p.id
+		LEFT JOIN services s ON s.id=ps.service_id
+		LEFT JOIN package_redemptions pr ON pr.client_package_id=cp.id
+		WHERE cp.client_id=? AND cp.salon_id=?
+		GROUP BY cp.id ORDER BY cp.purchased_at DESC`,
+		cc.ClientID, cc.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var out []pkgRow
+	for rows.Next() {
+		var p pkgRow
+		rows.Scan(&p.ID, &p.Name, &p.Description, &p.PurchasePrice, &p.PurchasedAt,
+			&p.ExpiresAt, &p.Status, &p.Services, &p.UsedCount, &p.TotalQty)
+		out = append(out, p)
+	}
+	if out == nil {
+		out = []pkgRow{}
+	}
+	a.JSON(w, http.StatusOK, out)
+}
+
+// GET /api/customer/membership
+func (a *App) CustomerMembership(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+
+	var m struct {
+		ID              uint    `json:"id"`
+		Name            string  `json:"name"`
+		Description     string  `json:"description"`
+		Price           float64 `json:"price"`
+		BillingCycle    string  `json:"billing_cycle"`
+		DiscountPct     float64 `json:"discount_pct"`
+		Status          string  `json:"status"`
+		StartDate       string  `json:"start_date"`
+		NextBillingDate string  `json:"next_billing_date"`
+		Color           string  `json:"color"`
+	}
+
+	err := a.DB.QueryRowContext(r.Context(), `
+		SELECT cm.id, mp.name, COALESCE(mp.description,''), mp.price,
+		       COALESCE(mp.billing_cycle,'monthly'), COALESCE(mp.service_discount_pct,0),
+		       cm.status, COALESCE(DATE_FORMAT(cm.start_date,'%Y-%m-%d'),''),
+		       COALESCE(DATE_FORMAT(cm.next_billing_date,'%Y-%m-%d'),''),
+		       COALESCE(mp.color,'#0D9488')
+		FROM client_memberships cm
+		JOIN membership_plans mp ON mp.id=cm.plan_id
+		WHERE cm.client_id=? AND cm.salon_id=? AND cm.status='active' LIMIT 1`,
+		cc.ClientID, cc.SalonID).
+		Scan(&m.ID, &m.Name, &m.Description, &m.Price, &m.BillingCycle,
+			&m.DiscountPct, &m.Status, &m.StartDate, &m.NextBillingDate, &m.Color)
+	if err != nil {
+		// No active membership — return null
+		a.JSON(w, http.StatusOK, nil)
+		return
+	}
+	a.JSON(w, http.StatusOK, m)
+}
+
+// GET /api/customer/transactions
+func (a *App) CustomerTransactions(w http.ResponseWriter, r *http.Request) {
+	cc := customerClaimsFrom(r)
+
+	type txRow struct {
+		ID            uint    `json:"id"`
+		GrandTotal    float64 `json:"grand_total"`
+		PaymentMethod string  `json:"payment_method"`
+		Status        string  `json:"status"`
+		CreatedAt     string  `json:"created_at"`
+		StaffName     string  `json:"staff_name"`
+		Items         string  `json:"items"`
+	}
+
+	rows, err := a.DB.QueryContext(r.Context(), `
+		SELECT t.id, t.grand_total, t.payment_method, t.status,
+		       DATE_FORMAT(t.created_at,'%Y-%m-%dT%H:%i:%sZ'),
+		       COALESCE(CONCAT(u.first_name,' ',u.last_name),''),
+		       COALESCE(GROUP_CONCAT(ti.name ORDER BY ti.name SEPARATOR ', '),'')
+		FROM transactions t
+		LEFT JOIN users u ON u.id=t.staff_id
+		LEFT JOIN transaction_items ti ON ti.transaction_id=t.id
+		WHERE t.client_id=? AND t.salon_id=?
+		GROUP BY t.id ORDER BY t.created_at DESC LIMIT 50`,
+		cc.ClientID, cc.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, fmt.Sprintf("db error: %v", err))
+		return
+	}
+	defer rows.Close()
+
+	var out []txRow
+	for rows.Next() {
+		var t txRow
+		rows.Scan(&t.ID, &t.GrandTotal, &t.PaymentMethod, &t.Status,
+			&t.CreatedAt, &t.StaffName, &t.Items)
+		out = append(out, t)
+	}
+	if out == nil {
+		out = []txRow{}
+	}
+	a.JSON(w, http.StatusOK, out)
 }

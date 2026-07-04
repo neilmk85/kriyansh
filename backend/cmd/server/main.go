@@ -93,10 +93,18 @@ func main() {
 
 	// Customer portal (protected — customer JWT)
 	customerAuth := middleware.RequireCustomerAuth(cfg.JWTSecret)
-	mux.Handle("GET /api/customer/profile", customerAuth(http.HandlerFunc(app.CustomerProfile)))
-	mux.Handle("PUT /api/customer/profile", customerAuth(http.HandlerFunc(app.CustomerUpdateProfile)))
+	mux.Handle("GET /api/customer/profile",   customerAuth(http.HandlerFunc(app.CustomerProfile)))
+	mux.Handle("PUT /api/customer/profile",   customerAuth(http.HandlerFunc(app.CustomerUpdateProfile)))
 	mux.Handle("GET /api/customer/appointments", customerAuth(http.HandlerFunc(app.CustomerAppointments)))
-	mux.Handle("GET /api/customer/loyalty", customerAuth(http.HandlerFunc(app.CustomerLoyalty)))
+	mux.Handle("GET /api/customer/loyalty",   customerAuth(http.HandlerFunc(app.CustomerLoyalty)))
+	mux.Handle("PATCH /api/customer/appointments/{id}/cancel",     customerAuth(http.HandlerFunc(app.CustomerCancelAppointment)))
+	mux.Handle("PUT /api/customer/appointments/{id}/reschedule",   customerAuth(http.HandlerFunc(app.CustomerRescheduleAppointment)))
+	mux.Handle("GET /api/customer/packages",  customerAuth(http.HandlerFunc(app.CustomerPackages)))
+	mux.Handle("GET /api/customer/membership", customerAuth(http.HandlerFunc(app.CustomerMembership)))
+	mux.Handle("GET /api/customer/transactions", customerAuth(http.HandlerFunc(app.CustomerTransactions)))
+	mux.HandleFunc("PUT /api/customer/auth/password", func(w http.ResponseWriter, r *http.Request) {
+		customerAuth(http.HandlerFunc(app.CustomerChangePassword)).ServeHTTP(w, r)
+	})
 
 	// Public review (no auth — customer-facing)
 	mux.HandleFunc("GET /api/public/review/{token}", app.GetReviewPage)

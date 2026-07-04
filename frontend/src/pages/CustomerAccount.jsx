@@ -25,28 +25,14 @@ const ALL_ACTIVITY = [
   { id: 11, type: 'membership',  service: 'Radiance Plan – April',      services: [],                    staff: null,         date: 'Apr 1, 2026',  time: '',          status: 'completed', amount: 99,  duration: 0,  reviewed: false },
 ]
 
-const MESSAGES = [
-  { id: 1, from: 'Kriyansh Beauty Bar', preview: 'Your appointment is confirmed for Jun 20 at 2:00 PM with Priyankkaa.', time: '2h ago', unread: true },
-  { id: 2, from: 'Kriyansh Beauty Bar', preview: 'Thank you for your visit! We hope you loved your Eyebrow Threading session. Leave us a review?', time: '3d ago', unread: false },
-  { id: 3, from: 'Kriyansh Beauty Bar', preview: 'Reminder: Your appointment is tomorrow at 11:00 AM with Sofia for Brazilian Waxing.', time: '1w ago', unread: false },
-]
-
-const FAVOURITES = [
-  { id: 1, name: 'Eyebrow Threading', category: 'Threading', price: 12, duration: 15 },
-  { id: 2, name: 'Brazilian Waxing', category: 'Body Waxing', price: 50, duration: 30 },
-  { id: 3, name: 'Classic Lash Set', category: 'Eyelashes', price: 120, duration: 90 },
-]
-
-const CARDS = [
-  { id: 1, brand: 'Visa', last4: '4242', expiry: '09/27', isDefault: true },
-  { id: 2, brand: 'Mastercard', last4: '5555', expiry: '03/26', isDefault: false },
-]
 
 const SIDEBAR_ITEMS = [
   { id: 'profile',    label: 'Profile',    icon: User },
   { id: 'activity',   label: 'Activity',   icon: Activity },
+  { id: 'packages',   label: 'Packages',   icon: Package },
+  { id: 'history',    label: 'History',    icon: Tag },
   { id: 'wallet',     label: 'Wallet',     icon: Wallet },
-  { id: 'messages',   label: 'Messages',   icon: MessageSquare, badge: 1 },
+  { id: 'messages',   label: 'Messages',   icon: MessageSquare },
   { id: 'favourites', label: 'Favourites', icon: Heart },
   { id: 'forms',      label: 'Forms',      icon: FileText },
   { id: 'settings',   label: 'Settings',   icon: Settings },
@@ -505,19 +491,27 @@ function ActivitySection({ navigate, onSave }) {
   const [loading, setLoading] = useState(true)
   const [reviewItem, setReviewItem] = useState(null)
   const [manageItem, setManageItem] = useState(null)
+  const [loyalty, setLoyalty] = useState(null)
 
-  useEffect(() => {
+  function fetchAppointments() {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) { setLoading(false); return }
-    fetch('/api/customer/appointments', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    return fetch('/api/customer/appointments', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) setItems(data.map(apiApptToItem))
-      })
+      .then(data => { if (Array.isArray(data)) setItems(data.map(apiApptToItem)) })
       .catch(() => {})
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    fetchAppointments()
+    const token = localStorage.getItem('salonos_customer_token')
+    if (token) {
+      fetch('/api/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(data => { if (data && typeof data.balance === 'number') setLoyalty(data) })
+        .catch(() => {})
+    }
   }, [])
 
   const upcoming = items.filter(a => a.status === 'confirmed')
@@ -529,16 +523,47 @@ function ActivitySection({ navigate, onSave }) {
       .filter(a => !search || a.service.toLowerCase().includes(search.toLowerCase()))
   }
 
-  function handleCancel(id) {
-    setItems(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a))
+  async function handleCancel(id) {
+    const token = localStorage.getItem('salonos_customer_token')
+    try {
+      const res = await fetch(`/api/customer/appointments/${id}/cancel`, {
+        method: 'PATCH', headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        setItems(prev => prev.map(a => a.id === id ? { ...a, status: 'cancelled' } : a))
+        onSave('Appointment cancelled')
+      } else {
+        const d = await res.json()
+        onSave(d.error || 'Could not cancel')
+      }
+    } catch { onSave('Could not cancel') }
     setManageItem(null)
   }
 
-  function handleReschedule(id, yr, mo, day, time) {
-    const dateStr = new Date(yr, mo, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    setItems(prev => prev.map(a => a.id === id ? { ...a, date: dateStr, time } : a))
+  async function handleReschedule(id, yr, mo, day, time) {
+    const token = localStorage.getItem('salonos_customer_token')
+    // Convert display time like "10:00 AM" to ISO
+    const [timePart, period] = time.split(' ')
+    let [hh, mm] = timePart.split(':').map(Number)
+    if (period === 'PM' && hh !== 12) hh += 12
+    if (period === 'AM' && hh === 12) hh = 0
+    const d = new Date(yr, mo, day, hh, mm)
+    const startAt = d.toISOString()
+    try {
+      const res = await fetch(`/api/customer/appointments/${id}/reschedule`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_at: startAt }),
+      })
+      if (res.ok) {
+        fetchAppointments()
+        onSave('Appointment rescheduled')
+      } else {
+        const err = await res.json()
+        onSave(err.error || 'Could not reschedule')
+      }
+    } catch { onSave('Could not reschedule') }
     setManageItem(null)
-    onSave('Appointment rescheduled')
   }
 
   function handleReviewSubmit(starRating, reviewComment) {
@@ -573,23 +598,8 @@ function ActivitySection({ navigate, onSave }) {
     return acc
   }, {})
 
-  // Loyalty summary
-  const loyaltyRaw = localStorage.getItem('ks_loyalty')
-  let loyaltyBalance, loyaltyTier
-  if (loyaltyRaw) {
-    const ld = JSON.parse(loyaltyRaw)
-    loyaltyBalance = ld.balance
-    loyaltyTier = ld.tier
-  } else {
-    const approxBalance = items
-      .filter(a => a.status === 'completed' && typeof a.amount === 'number')
-      .reduce((sum, a) => sum + a.amount, 0)
-    loyaltyBalance = approxBalance
-    if (approxBalance >= 1000) loyaltyTier = 'Platinum'
-    else if (approxBalance >= 500) loyaltyTier = 'Gold'
-    else if (approxBalance >= 100) loyaltyTier = 'Silver'
-    else loyaltyTier = 'Bronze'
-  }
+  const loyaltyBalance = loyalty?.balance ?? 0
+  const loyaltyTier = loyalty?.tier_name || 'Bronze'
 
   const AppointmentCard = ({ a }) => {
     const Icon = TYPE_ICON[a.type] || Calendar
@@ -752,266 +762,256 @@ function ActivitySection({ navigate, onSave }) {
   )
 }
 
-function WalletSection({ onSave }) {
-  const [cards, setCards] = useState(CARDS)
-  const [showAdd, setShowAdd] = useState(false)
-  const points = 315
+function WalletSection() {
+  const [loyalty, setLoyalty] = useState(null)
 
-  function removeCard(id) { setCards(c => c.filter(x => x.id !== id)) }
-  function setDefault(id) { setCards(c => c.map(x => ({ ...x, isDefault: x.id === id }))) }
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    fetch('/api/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => { if (data && typeof data.balance === 'number') setLoyalty(data) })
+      .catch(() => {})
+  }, [])
+
+  const balance = loyalty?.balance ?? 0
+  const tierName = loyalty?.tier_name || 'Bronze'
+  const tierColor = loyalty?.tier_color || '#6366F1'
+  const nextTier = loyalty?.next_tier_name
+  const nextPts = loyalty?.next_tier_points || 500
+  const rewards = loyalty?.rewards || []
+  const pct = nextPts > 0 ? Math.min((balance / nextPts) * 100, 100) : 100
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-[22px] font-black text-slate-900 mb-1">Wallet</h2>
-        <p className="text-[13px] text-slate-400">Payment methods and loyalty balance</p>
+        <p className="text-[13px] text-slate-400">Your loyalty points and available rewards</p>
       </div>
 
-      {/* Loyalty points */}
-      <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-        <div className="text-[12px] font-semibold opacity-70 mb-1">Loyalty Points</div>
-        <div className="text-[36px] font-black">{points}</div>
-        <div className="text-[12px] opacity-70 mt-1">≈ ${(points * 0.05).toFixed(2)} value · Radiance tier</div>
-        <div className="mt-3 h-1.5 bg-white/20 rounded-full overflow-hidden">
-          <div className="h-full bg-white/60 rounded-full" style={{ width: `${Math.min((points / 500) * 100, 100)}%` }} />
-        </div>
-        <div className="text-[11px] opacity-60 mt-1">{500 - points} pts to next reward</div>
-      </div>
-
-      {/* Payment methods */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[15px] font-bold text-slate-900">Payment methods</div>
-          <button onClick={() => setShowAdd(v => !v)}
-            className="flex items-center gap-1 text-[12px] font-semibold text-indigo-600 hover:text-indigo-700">
-            <Plus size={13} /> Add card
-          </button>
-        </div>
-
-        {showAdd && (
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-3 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Card number</label>
-                <input placeholder="1234 5678 9012 3456" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-[13px] focus:outline-none focus:border-indigo-400" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Expiry</label>
-                <input placeholder="MM/YY" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-[13px] focus:outline-none focus:border-indigo-400" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">CVV</label>
-                <input placeholder="•••" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-[13px] focus:outline-none focus:border-indigo-400" />
-              </div>
+      {/* Loyalty points card */}
+      <div className="rounded-2xl p-5 text-white" style={{ background: `linear-gradient(135deg, ${tierColor} 0%, #6366F1 100%)` }}>
+        <div className="text-[12px] font-semibold opacity-70 mb-1">Loyalty Points · {tierName}</div>
+        <div className="text-[36px] font-black">{balance.toLocaleString()}</div>
+        {nextTier && (
+          <>
+            <div className="mt-3 h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div className="h-full bg-white/60 rounded-full" style={{ width: `${pct}%` }} />
             </div>
-            <button onClick={() => { setShowAdd(false); onSave('Card added') }}
-              className="w-full py-2 rounded-xl text-white text-[13px] font-bold"
-              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-              Add card
-            </button>
-          </div>
+            <div className="text-[11px] opacity-60 mt-1">{nextPts - balance} pts to {nextTier}</div>
+          </>
         )}
+      </div>
 
-        <div className="space-y-2">
-          {cards.map(card => (
-            <div key={card.id} className="bg-white border border-slate-100 rounded-2xl px-4 py-3 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-slate-100 rounded-lg flex items-center justify-center">
-                  <CreditCard size={16} className="text-slate-500" />
-                </div>
+      {/* Available rewards */}
+      {rewards.length > 0 && (
+        <div>
+          <div className="text-[13px] font-bold text-slate-700 mb-3">Available rewards</div>
+          <div className="space-y-2">
+            {rewards.map(r => (
+              <div key={r.id} className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-100 rounded-2xl px-4 py-3 flex items-center gap-3">
+                <Gift size={18} className="text-amber-500 shrink-0" />
                 <div>
-                  <div className="text-[13px] font-bold text-slate-900">{card.brand} •••• {card.last4}</div>
-                  <div className="text-[11px] text-slate-400">Expires {card.expiry}</div>
+                  <div className="text-[13px] font-bold text-slate-900">{r.name}</div>
+                  <div className="text-[11px] text-slate-500">{r.reward_type === 'amount_off' ? `$${r.value} off` : r.reward_type === 'percent_off' ? `${r.value}% off` : r.reward_type}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                {card.isDefault
-                  ? <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">Default</span>
-                  : <button onClick={() => setDefault(card.id)} className="text-[11px] text-slate-400 hover:text-indigo-600">Set default</button>
-                }
-                <button onClick={() => removeCard(card.id)} className="w-7 h-7 rounded-full hover:bg-red-50 flex items-center justify-center">
-                  <Trash2 size={13} className="text-slate-300 hover:text-red-400" />
-                </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent transactions */}
+      {loyalty?.transactions?.length > 0 && (
+        <div>
+          <div className="text-[13px] font-bold text-slate-700 mb-3">Recent points activity</div>
+          <div className="space-y-1">
+            {loyalty.transactions.slice(0, 5).map((t, i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                <div className="text-[13px] text-slate-700">{t.description || (t.type === 'earn' ? 'Points earned' : t.type === 'redeem' ? 'Points redeemed' : 'Adjustment')}</div>
+                <div className={`text-[13px] font-bold ${t.type === 'earn' ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {t.type === 'earn' ? '+' : '-'}{Math.abs(t.points)} pts
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Payment info note */}
+      <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-start gap-3">
+        <CreditCard size={16} className="text-slate-400 shrink-0 mt-0.5" />
+        <div>
+          <div className="text-[13px] font-semibold text-slate-700">Payment methods</div>
+          <div className="text-[12px] text-slate-400 mt-0.5">Payment methods are saved securely during checkout.</div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ComingSoon({ icon: Icon, title, description }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="w-14 h-14 bg-slate-50 rounded-3xl flex items-center justify-center mb-4">
+        <Icon size={24} className="text-slate-300" />
+      </div>
+      <div className="text-[16px] font-black text-slate-700 mb-1">{title}</div>
+      <div className="text-[13px] text-slate-400 max-w-[240px]">{description}</div>
+      <span className="mt-4 px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 text-[11px] font-bold">Coming soon</span>
     </div>
   )
 }
 
 function MessagesSection() {
-  const [active, setActive] = useState(null)
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-[22px] font-black text-slate-900 mb-1">Messages</h2>
-        <p className="text-[13px] text-slate-400">Communications from Kriyansh Beauty Bar</p>
-      </div>
-
-      {active !== null ? (
-        <div>
-          <button onClick={() => setActive(null)}
-            className="flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-slate-800 mb-4">
-            <ArrowLeft size={14} /> Back
-          </button>
-          <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
-            <div className="text-[12px] font-semibold text-slate-400 mb-1">{MESSAGES[active].from} · {MESSAGES[active].time}</div>
-            <div className="text-[14px] text-slate-700 leading-relaxed">{MESSAGES[active].preview}</div>
-          </div>
-          <div className="mt-4 flex gap-2">
-            <input placeholder="Type a reply..." className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-[13px] focus:outline-none focus:border-indigo-400" />
-            <button className="px-4 py-2.5 rounded-xl text-white text-[13px] font-semibold"
-              style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>Send</button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {MESSAGES.map((m, i) => (
-            <button key={m.id} onClick={() => setActive(i)}
-              className="w-full text-left bg-white border border-slate-100 rounded-2xl p-4 flex items-start gap-3 hover:shadow-md transition-shadow shadow-sm">
-              <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-white text-[12px] font-black"
-                style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>K</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-0.5">
-                  <div className={`text-[13px] font-bold ${m.unread ? 'text-slate-900' : 'text-slate-600'}`}>{m.from}</div>
-                  <div className="text-[11px] text-slate-400">{m.time}</div>
-                </div>
-                <div className={`text-[12px] truncate ${m.unread ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>{m.preview}</div>
-              </div>
-              {m.unread && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-1 shrink-0" />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  return <ComingSoon icon={MessageSquare} title="Messages" description="In-app messaging with the salon will be available soon." />
 }
 
-function FavouritesSection({ navigate }) {
-  const [favs, setFavs] = useState(FAVOURITES)
-  function remove(id) { setFavs(f => f.filter(x => x.id !== id)) }
 
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-[22px] font-black text-slate-900 mb-1">Favourites</h2>
-        <p className="text-[13px] text-slate-400">Services you've saved</p>
-      </div>
-
-      {favs.length === 0 ? (
-        <div className="text-center py-12">
-          <Heart size={32} className="text-slate-200 mx-auto mb-3" />
-          <div className="text-[14px] text-slate-400">No favourites yet</div>
-          <button onClick={() => navigate('/home')} className="mt-3 text-[13px] font-semibold text-indigo-600">Browse services</button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {favs.map(s => (
-            <div key={s.id} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-pink-50 flex items-center justify-center">
-                  <Heart size={15} className="text-pink-400 fill-pink-400" />
-                </div>
-                <div>
-                  <div className="text-[14px] font-bold text-slate-900">{s.name}</div>
-                  <div className="text-[12px] text-slate-400">{s.category} · {s.duration} min · ${s.price}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => navigate('/home')}
-                  className="text-[12px] font-semibold text-indigo-600 hover:text-indigo-700 px-3 py-1.5 bg-indigo-50 rounded-lg">
-                  Book
-                </button>
-                <button onClick={() => remove(s.id)} className="w-7 h-7 rounded-full hover:bg-red-50 flex items-center justify-center">
-                  <X size={13} className="text-slate-300 hover:text-red-400" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+function FavouritesSection() {
+  return <ComingSoon icon={Heart} title="Favourites" description="Save your favourite services for quick booking — coming soon." />
 }
 
-function FormsSection({ onSave }) {
-  const [submitted, setSubmitted] = useState(false)
-  const [form, setForm] = useState({
-    skinType: '', concerns: '', allergies: '', medications: '', pregnant: 'no', consent: false,
-  })
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+function FormsSection() {
+  return <ComingSoon icon={FileText} title="Health Forms" description="Digital health intake forms will be available in a future update." />
+}
 
-  if (submitted) return (
-    <div className="text-center py-16">
-      <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-        <Check size={24} className="text-emerald-600" />
+/* ── Packages ───────────────────────────────────────────────── */
+function PackagesSection() {
+  const [packages, setPackages] = useState(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    fetch('/api/customer/packages', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => setPackages(Array.isArray(data) ? data : []))
+      .catch(() => setPackages([]))
+  }, [])
+
+  const STATUS_COLOR = {
+    active:     'bg-emerald-50 text-emerald-700',
+    exhausted:  'bg-slate-100 text-slate-500',
+    expired:    'bg-red-50 text-red-500',
+    cancelled:  'bg-slate-100 text-slate-400',
+  }
+
+  if (packages === null) return <div className="py-12 text-center text-[13px] text-slate-400">Loading…</div>
+
+  if (packages.length === 0) return (
+    <div className="space-y-4">
+      <div><h2 className="text-[22px] font-black text-slate-900 mb-1">Packages</h2><p className="text-[13px] text-slate-400">Your purchased service bundles</p></div>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="w-14 h-14 bg-indigo-50 rounded-3xl flex items-center justify-center mb-4"><Package size={24} className="text-indigo-300"/></div>
+        <div className="text-[16px] font-black text-slate-700 mb-1">No packages yet</div>
+        <div className="text-[13px] text-slate-400 max-w-[220px]">Service packages you purchase will appear here</div>
       </div>
-      <div className="text-[18px] font-black text-slate-900 mb-1">Form submitted</div>
-      <div className="text-[13px] text-slate-400">Your health intake form is on file with us.</div>
     </div>
   )
 
+  const active = packages.filter(p => p.status === 'active')
+  const past   = packages.filter(p => p.status !== 'active')
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-[22px] font-black text-slate-900 mb-1">Forms</h2>
-        <p className="text-[13px] text-slate-400">Health intake & consent forms</p>
-      </div>
+    <div className="space-y-6">
+      <div><h2 className="text-[22px] font-black text-slate-900 mb-1">Packages</h2><p className="text-[13px] text-slate-400">Your purchased service bundles</p></div>
 
-      <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 mb-1">
-          <FileText size={16} className="text-indigo-500" />
-          <span className="text-[15px] font-bold text-slate-900">Health Intake Form</span>
-        </div>
-
-        {[
-          { label: 'Skin type', key: 'skinType', type: 'select', options: ['Normal', 'Dry', 'Oily', 'Combination', 'Sensitive'] },
-          { label: 'Skin concerns', key: 'concerns', type: 'textarea', placeholder: 'e.g. acne, hyperpigmentation, sensitivity...' },
-          { label: 'Known allergies', key: 'allergies', type: 'textarea', placeholder: 'e.g. latex, fragrances, nuts...' },
-          { label: 'Current medications', key: 'medications', type: 'textarea', placeholder: 'List any relevant medications...' },
-        ].map(f => (
-          <div key={f.key}>
-            <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">{f.label}</label>
-            {f.type === 'select' ? (
-              <select value={form[f.key]} onChange={e => set(f.key, e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] text-slate-800 bg-white focus:outline-none focus:border-indigo-400">
-                <option value="">Select...</option>
-                {f.options.map(o => <option key={o}>{o}</option>)}
-              </select>
-            ) : (
-              <textarea rows={2} value={form[f.key]} onChange={e => set(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] text-slate-800 resize-none focus:outline-none focus:border-indigo-400" />
-            )}
-          </div>
-        ))}
-
+      {active.length > 0 && (
         <div>
-          <label className="block text-[12px] font-semibold text-slate-500 mb-1.5">Are you pregnant?</label>
-          <div className="flex gap-3">
-            {['yes', 'no'].map(v => (
-              <button key={v} onClick={() => set('pregnant', v)}
-                className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold capitalize border transition-all ${form.pregnant === v ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500'}`}>
-                {v}
-              </button>
+          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">Active</div>
+          <div className="space-y-3">
+            {active.map(p => (
+              <div key={p.id} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[14px] font-bold text-slate-900">{p.name}</div>
+                    {p.services && <div className="text-[12px] text-slate-400 mt-0.5">{p.services}</div>}
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLOR[p.status] || 'bg-slate-100 text-slate-500'}`}>{p.status}</span>
+                </div>
+                <div className="flex items-center gap-4 mt-3 text-[12px] text-slate-500">
+                  <span>{p.used_count} / {p.total_qty} sessions used</span>
+                  {p.expires_at && <span>Expires {new Date(p.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                </div>
+                <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${p.total_qty > 0 ? (p.used_count / p.total_qty) * 100 : 0}%` }} />
+                </div>
+              </div>
             ))}
           </div>
         </div>
+      )}
 
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input type="checkbox" checked={form.consent} onChange={e => set('consent', e.target.checked)}
-            className="mt-0.5 accent-indigo-500" />
-          <span className="text-[12px] text-slate-500">I consent to receive beauty treatments and confirm that the information above is accurate to the best of my knowledge.</span>
-        </label>
+      {past.length > 0 && (
+        <div>
+          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">Past</div>
+          <div className="space-y-3">
+            {past.map(p => (
+              <div key={p.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 opacity-70">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[14px] font-bold text-slate-700">{p.name}</div>
+                    {p.services && <div className="text-[12px] text-slate-400 mt-0.5">{p.services}</div>}
+                  </div>
+                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLOR[p.status] || 'bg-slate-100 text-slate-500'}`}>{p.status}</span>
+                </div>
+                <div className="text-[12px] text-slate-400 mt-2">{p.used_count} / {p.total_qty} sessions · Purchased {new Date(p.purchased_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
-        <button onClick={() => { setSubmitted(true); onSave('Form submitted') }} disabled={!form.consent}
-          className="w-full py-2.5 rounded-xl text-white text-[13px] font-bold disabled:opacity-40 transition-opacity hover:opacity-90"
-          style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-          Submit form
-        </button>
+/* ── History ────────────────────────────────────────────────── */
+function HistorySection() {
+  const [txns, setTxns] = useState(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    fetch('/api/customer/transactions', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => setTxns(Array.isArray(data) ? data : []))
+      .catch(() => setTxns([]))
+  }, [])
+
+  if (txns === null) return <div className="py-12 text-center text-[13px] text-slate-400">Loading…</div>
+
+  if (txns.length === 0) return (
+    <div className="space-y-4">
+      <div><h2 className="text-[22px] font-black text-slate-900 mb-1">History</h2><p className="text-[13px] text-slate-400">Your payment receipts</p></div>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="w-14 h-14 bg-indigo-50 rounded-3xl flex items-center justify-center mb-4"><Tag size={24} className="text-indigo-300"/></div>
+        <div className="text-[16px] font-black text-slate-700 mb-1">No transactions yet</div>
+        <div className="text-[13px] text-slate-400 max-w-[220px]">Your payment receipts will appear here</div>
+      </div>
+    </div>
+  )
+
+  const METHOD_ICON = { card: '💳', cash: '💵', tap: '📱' }
+
+  return (
+    <div className="space-y-5">
+      <div><h2 className="text-[22px] font-black text-slate-900 mb-1">History</h2><p className="text-[13px] text-slate-400">Your payment receipts</p></div>
+      <div className="space-y-2">
+        {txns.map(t => (
+          <div key={t.id} className="bg-white border border-slate-100 rounded-2xl px-4 py-3 shadow-sm flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-base shrink-0">{METHOD_ICON[t.payment_method] || '💳'}</div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-slate-900 truncate">{t.items || 'Services'}</div>
+                <div className="text-[11px] text-slate-400">{t.staff_name ? `with ${t.staff_name} · ` : ''}{new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-[14px] font-black text-slate-900">${Number(t.grand_total).toFixed(2)}</div>
+              <div className={`text-[10px] font-bold ${t.status === 'completed' ? 'text-emerald-600' : t.status === 'refunded' ? 'text-amber-600' : 'text-red-500'}`}>{t.status}</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -1021,6 +1021,31 @@ function SettingsSection({ onSave, navigate }) {
   const [notifs, setNotifs] = useState({ smsAppt: true, whatsappAppt: true, emailMkt: true, smsMkt: true, whatsappMkt: false })
   const toggle = k => setNotifs(n => ({ ...n, [k]: !n[k] }))
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [pwError, setPwError] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+
+  async function handleChangePassword() {
+    setPwError('')
+    if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match'); return }
+    if (pwForm.next.length < 6) { setPwError('Password must be at least 6 characters'); return }
+    setPwSaving(true)
+    const token = localStorage.getItem('salonos_customer_token')
+    try {
+      const res = await fetch('/api/customer/auth/password', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setPwForm({ current: '', next: '', confirm: '' })
+        onSave('Password updated')
+      } else {
+        setPwError(data.error || 'Failed to change password')
+      }
+    } catch { setPwError('Failed to change password') }
+    finally { setPwSaving(false) }
+  }
   const [showDelete, setShowDelete] = useState(false)
   const [cancelPolicy, setCancelPolicy] = useState(() => {
     const saved = localStorage.getItem('ks_cancel_policy')
@@ -1094,8 +1119,9 @@ function SettingsSection({ onSave, navigate }) {
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-[14px] focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200" />
             </div>
           ))}
-          <button onClick={() => { setPwForm({ current:'', next:'', confirm:'' }); onSave('Password updated') }}
-            className="px-5 py-2.5 rounded-xl text-white text-[13px] font-bold hover:opacity-90 transition-opacity"
+          {pwError && <p className="text-[12px] text-red-500">{pwError}</p>}
+          <button onClick={handleChangePassword} disabled={pwSaving || !pwForm.current || !pwForm.next}
+            className="px-5 py-2.5 rounded-xl text-white text-[13px] font-bold hover:opacity-90 disabled:opacity-50 transition-opacity"
             style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
             Update password
           </button>
@@ -1307,10 +1333,12 @@ export default function CustomerAccount() {
         <main className="flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm p-6 min-h-[600px]">
           {section === 'profile'    && <ProfileSection    onSave={showToast} onRefresh={refreshCustomer} />}
           {section === 'activity'   && <ActivitySection   navigate={navigate} onSave={showToast} />}
-          {section === 'wallet'     && <WalletSection     onSave={showToast} />}
+          {section === 'packages'   && <PackagesSection   />}
+          {section === 'history'    && <HistorySection    />}
+          {section === 'wallet'     && <WalletSection     />}
           {section === 'messages'   && <MessagesSection   />}
-          {section === 'favourites' && <FavouritesSection navigate={navigate} />}
-          {section === 'forms'      && <FormsSection      onSave={showToast} />}
+          {section === 'favourites' && <FavouritesSection />}
+          {section === 'forms'      && <FormsSection      />}
           {section === 'settings'   && <SettingsSection   onSave={showToast} navigate={navigate} />}
         </main>
       </div>
