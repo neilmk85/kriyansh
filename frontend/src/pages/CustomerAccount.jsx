@@ -8,29 +8,15 @@ import {
   RotateCcw, XCircle, Gift, Package, Tag, RefreshCw, ChevronLeft,
 } from 'lucide-react'
 
-/* ── Mock data ──────────────────────────────────────────────── */
-const USER = { firstName: 'Nilesh', lastName: 'Kakade', email: 'nileshmk85@gmail.com', phone: '+91 9999999999', dob: '1985-10-15', gender: 'Male' }
 
-const ALL_ACTIVITY = [
-  { id: 6,  type: 'appointment', service: 'Eyebrow Threading',           services: ['Eyebrow Threading'], staff: 'Priyankkaa', date: 'Jun 20, 2026', time: '2:00 PM',  status: 'confirmed', amount: 12,  duration: 15, reviewed: false },
-  { id: 7,  type: 'appointment', service: 'Brazilian Waxing',            services: ['Brazilian Waxing'],  staff: 'Sofia',      date: 'Jun 25, 2026', time: '11:00 AM', status: 'confirmed', amount: 50,  duration: 30, reviewed: false },
-  { id: 1,  type: 'appointment', service: 'Eyebrow Threading',           services: ['Eyebrow Threading'], staff: 'Priyankkaa', date: 'Jun 10, 2026', time: '2:30 PM',  status: 'completed', amount: 12,  duration: 15, reviewed: true  },
-  { id: 2,  type: 'appointment', service: 'Brazilian Waxing',            services: ['Brazilian Waxing'],  staff: 'Sofia',      date: 'May 28, 2026', time: '11:00 AM', status: 'completed', amount: 50,  duration: 30, reviewed: false },
-  { id: 3,  type: 'appointment', service: 'Deep Cleansing Facial',       services: ['Deep Cleansing Facial'], staff: 'Priyankkaa', date: 'May 14, 2026', time: '3:00 PM', status: 'cancelled', amount: 75, duration: 60, reviewed: false },
-  { id: 8,  type: 'membership',  service: 'Radiance Plan – May',         services: [],                    staff: null,         date: 'May 1, 2026',  time: '',          status: 'completed', amount: 99,  duration: 0,  reviewed: false },
-  { id: 4,  type: 'appointment', service: 'Classic Lash Set',            services: ['Classic Lash Set'],  staff: 'Priyankkaa', date: 'Apr 30, 2026', time: '1:00 PM',  status: 'completed', amount: 120, duration: 90, reviewed: false },
-  { id: 5,  type: 'appointment', service: 'Eyebrow + Upper Lip Threading', services: ['Eyebrow Threading','Upper Lip Threading'], staff: 'Priyankkaa', date: 'Apr 15, 2026', time: '10:00 AM', status: 'completed', amount: 20, duration: 25, reviewed: false },
-  { id: 9,  type: 'gift',        service: 'Gift Card – $50',             services: [],                    staff: null,         date: 'Apr 5, 2026',  time: '',          status: 'completed', amount: 50,  duration: 0,  reviewed: false },
-  { id: 10, type: 'appointment', service: 'Full Face Threading',         services: ['Full Face Threading'], staff: 'Priyankkaa', date: 'Mar 22, 2026', time: '3:30 PM', status: 'no-show',   amount: 28,  duration: 30, reviewed: false },
-  { id: 11, type: 'membership',  service: 'Radiance Plan – April',      services: [],                    staff: null,         date: 'Apr 1, 2026',  time: '',          status: 'completed', amount: 99,  duration: 0,  reviewed: false },
-]
 
 
 const SIDEBAR_ITEMS = [
   { id: 'profile',    label: 'Profile',    icon: User },
   { id: 'activity',   label: 'Activity',   icon: Activity },
-  { id: 'packages',   label: 'Packages',   icon: Package },
-  { id: 'history',    label: 'History',    icon: Tag },
+  { id: 'packages',    label: 'Packages',    icon: Package },
+  { id: 'membership', label: 'Memberships', icon: CreditCard },
+  { id: 'history',    label: 'History',     icon: Tag },
   { id: 'wallet',     label: 'Wallet',     icon: Wallet },
   { id: 'messages',   label: 'Messages',   icon: MessageSquare },
   { id: 'favourites', label: 'Favourites', icon: Heart },
@@ -1017,6 +1003,82 @@ function HistorySection() {
   )
 }
 
+function MembershipSection() {
+  const [membership, setMembership] = useState(undefined)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) { setLoading(false); return }
+    fetch('/api/customer/membership', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => setMembership(data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return (
+    <div className="flex justify-center items-center py-20">
+      <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  return (
+    <div>
+      <h2 className="text-[20px] font-bold text-slate-900 mb-1">Memberships</h2>
+      <p className="text-[13px] text-slate-400 mb-6">Your active membership plan</p>
+
+      {!membership ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4">
+            <Tag size={28} className="text-indigo-400" />
+          </div>
+          <p className="text-[16px] font-bold text-slate-700 mb-1">No active membership</p>
+          <p className="text-[13px] text-slate-400">Ask your salon to set up a membership plan for you</p>
+        </div>
+      ) : (
+        <div className="max-w-md">
+          <div className="rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)]"
+            style={{ background: `linear-gradient(135deg, ${membership.color || '#0D9488'}, ${membership.color ? membership.color + 'cc' : '#6366F1'})` }}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-white/70 text-[11px] font-bold uppercase tracking-widest mb-1">Active Plan</p>
+                  <h3 className="text-[22px] font-black text-white">{membership.name}</h3>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Tag size={22} className="text-white" />
+                </div>
+              </div>
+              {membership.description && (
+                <p className="text-white/80 text-[13px] mb-5">{membership.description}</p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white/15 rounded-xl px-4 py-3">
+                  <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mb-1">Monthly</p>
+                  <p className="text-white text-[18px] font-black">${membership.price}</p>
+                </div>
+                {membership.discount_pct > 0 && (
+                  <div className="bg-white/15 rounded-xl px-4 py-3">
+                    <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mb-1">Discount</p>
+                    <p className="text-white text-[18px] font-black">{membership.discount_pct}% off</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="bg-black/10 px-6 py-3 flex items-center justify-between">
+              <span className="text-white/70 text-[12px]">Member since {membership.start_date}</span>
+              {membership.next_billing_date && (
+                <span className="text-white/70 text-[12px]">Renews {membership.next_billing_date}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SettingsSection({ onSave, navigate }) {
   const [notifs, setNotifs] = useState({ smsAppt: true, whatsappAppt: true, emailMkt: true, smsMkt: true, whatsappMkt: false })
   const toggle = k => setNotifs(n => ({ ...n, [k]: !n[k] }))
@@ -1333,8 +1395,9 @@ export default function CustomerAccount() {
         <main className="flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm p-6 min-h-[600px]">
           {section === 'profile'    && <ProfileSection    onSave={showToast} onRefresh={refreshCustomer} />}
           {section === 'activity'   && <ActivitySection   navigate={navigate} onSave={showToast} />}
-          {section === 'packages'   && <PackagesSection   />}
-          {section === 'history'    && <HistorySection    />}
+          {section === 'packages'    && <PackagesSection    />}
+          {section === 'membership'  && <MembershipSection  />}
+          {section === 'history'     && <HistorySection     />}
           {section === 'wallet'     && <WalletSection     />}
           {section === 'messages'   && <MessagesSection   />}
           {section === 'favourites' && <FavouritesSection />}
