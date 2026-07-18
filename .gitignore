@@ -20,3 +20,12 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Compiled backend binaries
+backend/kriyansh-server
+
+# Flutter build output
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies

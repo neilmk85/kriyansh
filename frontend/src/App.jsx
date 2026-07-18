@@ -41,6 +41,9 @@ import CustomerReview from '@/pages/CustomerReview'
 import Reports from '@/pages/Reports'
 import Purchases from '@/pages/Purchases'
 import NewPurchaseOrder from '@/pages/NewPurchaseOrder'
+import Kiosk from '@/pages/Kiosk'
+import WalkInQueue from '@/pages/WalkInQueue'
+import TVDisplay from '@/pages/TVDisplay'
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -78,6 +81,8 @@ export default function App() {
             <Route path="/account"       element={<CustomerAccount />} />
             <Route path="/gift"          element={<CustomerGiftCard />} />
             <Route path="/review/:token" element={<CustomerReview />} />
+            <Route path="/kiosk"         element={<Kiosk />} />
+            <Route path="/tv"            element={<TVDisplay />} />
             <Route path="/booking"                    element={<BookingPage />} />
             <Route path="/checkin/:appointmentId"     element={<CheckIn />} />
             <Route path="/" element={
@@ -87,6 +92,7 @@ export default function App() {
             }>
               <Route index element={<Dashboard />} />
               <Route path="appointments" element={<Appointments />} />
+              <Route path="queue"        element={<WalkInQueue />} />
               <Route path="clients"          element={<Clients />} />
               <Route path="clients/segments" element={<ClientSegments />} />
               <Route path="services"     element={<Services />} />

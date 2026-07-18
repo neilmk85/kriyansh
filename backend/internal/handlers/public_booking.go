@@ -263,10 +263,14 @@ func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create appointment
+	piID := ""
+	if a.StripeKey != "" && req.PaymentIntentID != "" {
+		piID = req.PaymentIntentID
+	}
 	res, err := a.DB.ExecContext(r.Context(),
-		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, status, notes, deposit_paid, source)
-		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, 'online')`,
-		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid)
+		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, status, notes, deposit_paid, source, payment_intent_id)
+		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, 'online', ?)`,
+		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid, piID)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

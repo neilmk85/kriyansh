@@ -2,7 +2,12 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -222,4 +227,93 @@ func (a *App) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.JSON(w, http.StatusOK, t)
+}
+
+// SendPaymentLink POST /api/transactions/{id}/payment-link
+func (a *App) SendPaymentLink(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	id, err := pathID(r, "id")
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var grandTotal float64
+	var clientID sql.NullInt64
+	var phone, firstName sql.NullString
+
+	err = a.DB.QueryRowContext(r.Context(),
+		`SELECT t.grand_total, t.client_id, c.phone, c.first_name
+		 FROM transactions t
+		 LEFT JOIN clients c ON c.id = t.client_id AND c.salon_id = t.salon_id
+		 WHERE t.id = ? AND t.salon_id = ?`, id, claims.SalonID).
+		Scan(&grandTotal, &clientID, &phone, &firstName)
+	if err == sql.ErrNoRows {
+		a.Error(w, http.StatusNotFound, "transaction not found")
+		return
+	}
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+
+	if !phone.Valid || phone.String == "" {
+		a.Error(w, http.StatusBadRequest, "no phone number on file for this client")
+		return
+	}
+
+	// Build Stripe Checkout Session
+	amountCents := int(grandTotal * 100)
+	form := url.Values{}
+	form.Set("payment_method_types[]", "card")
+	form.Set("mode", "payment")
+	form.Set("line_items[0][price_data][currency]", "usd")
+	form.Set("line_items[0][price_data][product_data][name]", "Kriyansh Beauty Bar Services")
+	form.Set("line_items[0][price_data][unit_amount]", fmt.Sprintf("%d", amountCents))
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("success_url", "https://store.kriyanshbeautybar.com/kiosk")
+	form.Set("cancel_url", "https://store.kriyanshbeautybar.com/kiosk")
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		"https://api.stripe.com/v1/checkout/sessions",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "failed to build stripe request")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+a.StripeKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "stripe request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		a.Error(w, http.StatusInternalServerError, "stripe error: "+string(body))
+		return
+	}
+
+	var stripeResp struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(body, &stripeResp); err != nil || stripeResp.URL == "" {
+		a.Error(w, http.StatusInternalServerError, "failed to parse stripe response")
+		return
+	}
+
+	name := firstName.String
+	if name == "" {
+		name = "there"
+	}
+	msg := fmt.Sprintf("Hi %s! Complete your payment for your visit at Kriyansh Beauty Bar: %s", name, stripeResp.URL)
+	a.Notifier.SendSMS(phone.String, msg)
+
+	a.JSON(w, http.StatusOK, map[string]any{
+		"sent":  true,
+		"phone": phone.String,
+	})
 }

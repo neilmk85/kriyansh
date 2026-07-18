@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"strconv"
 	"time"
 
 	"salonos/internal/models"
@@ -77,7 +78,7 @@ func (a *App) ListAppointments(w http.ResponseWriter, r *http.Request) {
 		rows, err = a.DB.QueryContext(r.Context(),
 			`SELECT a.id, a.salon_id, a.client_id, a.staff_id,
 			        a.start_at, a.end_at, a.status, COALESCE(a.notes,''),
-			        a.deposit_paid, a.source, a.created_at,
+			        a.deposit_paid, COALESCE(a.deposit_charged,0), a.source, a.created_at,
 			        CONCAT(c.first_name,' ',c.last_name),
 			        COALESCE(c.phone,''),
 			        CONCAT(u.first_name,' ',u.last_name)
@@ -91,7 +92,7 @@ func (a *App) ListAppointments(w http.ResponseWriter, r *http.Request) {
 		rows, err = a.DB.QueryContext(r.Context(),
 			`SELECT a.id, a.salon_id, a.client_id, a.staff_id,
 			        a.start_at, a.end_at, a.status, COALESCE(a.notes,''),
-			        a.deposit_paid, a.source, a.created_at,
+			        a.deposit_paid, COALESCE(a.deposit_charged,0), a.source, a.created_at,
 			        CONCAT(c.first_name,' ',c.last_name),
 			        COALESCE(c.phone,''),
 			        CONCAT(u.first_name,' ',u.last_name)
@@ -113,7 +114,7 @@ func (a *App) ListAppointments(w http.ResponseWriter, r *http.Request) {
 		var ap models.Appointment
 		rows.Scan(&ap.ID, &ap.SalonID, &ap.ClientID, &ap.StaffID,
 			&ap.StartAt, &ap.EndAt, &ap.Status, &ap.Notes,
-			&ap.DepositPaid, &ap.Source, &ap.CreatedAt,
+			&ap.DepositPaid, &ap.DepositCharged, &ap.Source, &ap.CreatedAt,
 			&ap.ClientName, &ap.ClientPhone, &ap.StaffName)
 		appts = append(appts, ap)
 	}
@@ -134,7 +135,7 @@ func (a *App) GetAppointment(w http.ResponseWriter, r *http.Request) {
 	err = a.DB.QueryRowContext(r.Context(),
 		`SELECT a.id, a.salon_id, a.client_id, a.staff_id,
 		        a.start_at, a.end_at, a.status, COALESCE(a.notes,''),
-		        a.deposit_paid, a.source, a.created_at,
+		        a.deposit_paid, COALESCE(a.deposit_charged,0), a.source, a.created_at,
 		        CONCAT(c.first_name,' ',c.last_name),
 		        COALESCE(c.phone,''),
 		        CONCAT(u.first_name,' ',u.last_name)
@@ -145,7 +146,7 @@ func (a *App) GetAppointment(w http.ResponseWriter, r *http.Request) {
 		 WHERE a.id=? AND a.salon_id=?`, id, claims.SalonID).
 		Scan(&ap.ID, &ap.SalonID, &ap.ClientID, &ap.StaffID,
 			&ap.StartAt, &ap.EndAt, &ap.Status, &ap.Notes,
-			&ap.DepositPaid, &ap.Source, &ap.CreatedAt,
+			&ap.DepositPaid, &ap.DepositCharged, &ap.Source, &ap.CreatedAt,
 			&ap.ClientName, &ap.ClientPhone, &ap.StaffName)
 	if err == sql.ErrNoRows {
 		a.Error(w, http.StatusNotFound, "appointment not found")
@@ -268,6 +269,29 @@ func (a *App) UpdateAppointmentStatus(w http.ResponseWriter, r *http.Request) {
 	if body.Status == "cancelled" {
 		go a.TriggerGapFill(context.Background(), claims.SalonID, id)
 	}
+	if body.Status == "no_show" {
+		// Auto-capture deposit if a PaymentIntent was held and not yet charged
+		var piID string
+		var depositPaid float64
+		var depositCharged int
+		a.DB.QueryRowContext(r.Context(),
+			`SELECT COALESCE(payment_intent_id,''), COALESCE(deposit_paid,0), COALESCE(deposit_charged,0)
+			 FROM appointments WHERE id=? AND salon_id=?`, id, claims.SalonID).
+			Scan(&piID, &depositPaid, &depositCharged)
+		if piID != "" && depositPaid > 0 && depositCharged == 0 && a.StripeKey != "" {
+			captureURL := "https://api.stripe.com/v1/payment_intents/" + piID + "/capture"
+			captureReq, _ := http.NewRequestWithContext(r.Context(), "POST", captureURL, nil)
+			captureReq.Header.Set("Authorization", "Bearer "+a.StripeKey)
+			resp, err := http.DefaultClient.Do(captureReq)
+			if err == nil && resp.StatusCode == 200 {
+				resp.Body.Close()
+				a.DB.ExecContext(r.Context(),
+					`UPDATE appointments SET deposit_charged=1 WHERE id=?`, id)
+			} else if resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
 	a.JSON(w, http.StatusOK, map[string]any{"status": body.Status})
 }
 
@@ -288,6 +312,123 @@ func (a *App) CancelAppointment(w http.ResponseWriter, r *http.Request) {
 	// Trigger gap-fill in background — notifies waitlist/at-risk clients
 	go a.TriggerGapFill(context.Background(), claims.SalonID, id)
 	a.JSON(w, http.StatusOK, map[string]any{"cancelled": true})
+}
+
+// ListPendingCheckins GET /api/checkins/pending — returns appointments awaiting service start
+// (status=checked_in) and walk-ins still waiting, combined into one list for the mobile admin.
+func (a *App) ListPendingCheckins(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+
+	type PendingCheckin struct {
+		ID          uint      `json:"id"`
+		Type        string    `json:"type"` // "appointment" | "walkin"
+		ClientName  string    `json:"client_name"`
+		ClientPhone string    `json:"client_phone"`
+		ServiceName string    `json:"service_name"`
+		StaffName   string    `json:"staff_name"`
+		CheckedInAt time.Time `json:"checked_in_at"`
+		StartAt     string    `json:"start_at"` // "HH:MM" for appointments, "" for walk-ins
+		Notes       string    `json:"notes"`
+	}
+
+	items := []PendingCheckin{}
+
+	// Checked-in appointments waiting for admin to start service
+	apptRows, err := a.DB.QueryContext(r.Context(), `
+		SELECT
+			ap.id,
+			COALESCE(CONCAT(c.first_name,' ',c.last_name), 'Unknown') AS client_name,
+			COALESCE(c.phone, '')                                       AS client_phone,
+			COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '), 'Service') AS service_name,
+			COALESCE(CONCAT(u.first_name,' ',u.last_name), 'Any Available')          AS staff_name,
+			COALESCE(ap.checked_in_at, ap.start_at)                    AS checked_in_at,
+			DATE_FORMAT(ap.start_at, '%H:%i')                           AS start_at,
+			COALESCE(ap.notes, '')                                      AS notes
+		FROM appointments ap
+		LEFT JOIN clients c              ON c.id  = ap.client_id
+		LEFT JOIN users u                ON u.id  = ap.staff_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = ap.id
+		LEFT JOIN services s             ON s.id  = aps.service_id
+		WHERE ap.salon_id = ? AND ap.status = 'checked_in'
+		  AND DATE(ap.start_at) = CURDATE()
+		GROUP BY ap.id
+		ORDER BY ap.checked_in_at ASC
+	`, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer apptRows.Close()
+	for apptRows.Next() {
+		var item PendingCheckin
+		item.Type = "appointment"
+		var checkedInAt sql.NullTime
+		if err := apptRows.Scan(&item.ID, &item.ClientName, &item.ClientPhone,
+			&item.ServiceName, &item.StaffName, &checkedInAt, &item.StartAt, &item.Notes); err != nil {
+			continue
+		}
+		if checkedInAt.Valid {
+			item.CheckedInAt = checkedInAt.Time
+		}
+		items = append(items, item)
+	}
+
+	// Walk-ins still waiting (not yet in_service)
+	walkRows, err := a.DB.QueryContext(r.Context(), `
+		SELECT
+			id,
+			name                                                             AS client_name,
+			phone                                                            AS client_phone,
+			COALESCE(NULLIF(service_names,''), 'Walk-in')                    AS service_name,
+			COALESCE(NULLIF(assigned_staff_name,''), NULLIF(preferred_staff_name,''), 'Any Available') AS staff_name,
+			checked_in_at,
+			COALESCE(notes, '')                                              AS notes
+		FROM walk_in_queue
+		WHERE salon_id = ? AND status = 'waiting'
+		  AND DATE(checked_in_at) = CURDATE()
+		ORDER BY checked_in_at ASC
+	`, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	defer walkRows.Close()
+	for walkRows.Next() {
+		var item PendingCheckin
+		item.Type = "walkin"
+		if err := walkRows.Scan(&item.ID, &item.ClientName, &item.ClientPhone,
+			&item.ServiceName, &item.StaffName, &item.CheckedInAt, &item.Notes); err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	a.JSON(w, http.StatusOK, items)
+}
+
+// ApproveCheckin PATCH /api/checkins/{id}/approve — moves appointment to in_progress
+func (a *App) ApproveCheckin(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE appointments SET status='in_progress'
+		 WHERE id=? AND salon_id=? AND status='checked_in'`,
+		id, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		a.Error(w, http.StatusNotFound, "appointment not found or not in checked_in state")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]any{"approved": true})
 }
 
 // CheckIn POST /api/checkin — public endpoint, no auth required

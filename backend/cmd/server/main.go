@@ -90,6 +90,11 @@ func main() {
 	mux.HandleFunc("GET /api/public/slots", app.PublicListSlots)
 	mux.HandleFunc("POST /api/public/payment-intent", app.PublicCreatePaymentIntent)
 	mux.HandleFunc("POST /api/public/appointments", app.PublicCreateAppointment)
+	mux.HandleFunc("POST /api/public/walkin",                     app.PublicWalkIn)
+	mux.HandleFunc("GET /api/public/walkin/lookup",              app.PublicWalkInLookup)
+	mux.HandleFunc("GET /api/public/appointments/today",         app.PublicAppointmentsByPhone)
+	mux.HandleFunc("POST /api/public/appointments/{id}/checkin", app.PublicAppointmentCheckin)
+	mux.HandleFunc("GET /api/public/queue",                     app.PublicQueueDisplay)
 
 	// Customer portal (protected — customer JWT)
 	customerAuth := middleware.RequireCustomerAuth(cfg.JWTSecret)
@@ -160,6 +165,8 @@ func main() {
 	mux.Handle("POST /api/appointments", auth(http.HandlerFunc(app.CreateAppointment)))
 	mux.Handle("PATCH /api/appointments/{id}/status",
 		auth(http.HandlerFunc(app.UpdateAppointmentStatus)))
+	mux.Handle("GET /api/checkins/pending",       auth(http.HandlerFunc(app.ListPendingCheckins)))
+	mux.Handle("PATCH /api/checkins/{id}/approve", auth(http.HandlerFunc(app.ApproveCheckin)))
 	mux.Handle("DELETE /api/appointments/{id}",
 		auth(http.HandlerFunc(app.CancelAppointment)))
 
@@ -184,6 +191,7 @@ func main() {
 	mux.Handle("GET /api/transactions", auth(http.HandlerFunc(app.ListTransactions)))
 	mux.Handle("GET /api/transactions/{id}", auth(http.HandlerFunc(app.GetTransaction)))
 	mux.Handle("POST /api/transactions", auth(http.HandlerFunc(app.CreateTransaction)))
+	mux.Handle("POST /api/transactions/{id}/payment-link", auth(http.HandlerFunc(app.SendPaymentLink)))
 
 	// Public check-in (no auth)
 	mux.HandleFunc("POST /api/checkin", app.CheckIn)
@@ -302,6 +310,10 @@ func main() {
 	mux.Handle("GET /api/direct-purchases", auth(http.HandlerFunc(app.ListDirectPurchases)))
 	mux.Handle("GET /api/direct-purchases/{id}", auth(http.HandlerFunc(app.GetDirectPurchase)))
 	mux.Handle("POST /api/direct-purchases", auth(middleware.RequireRole("owner", "manager")(http.HandlerFunc(app.CreateDirectPurchase))))
+
+	// Walk-in queue
+	mux.Handle("GET /api/walkins",               auth(http.HandlerFunc(app.ListWalkIns)))
+	mux.Handle("PATCH /api/walkins/{id}/status", auth(http.HandlerFunc(app.UpdateWalkInStatus)))
 
 	// ── HTTP Server with graceful shutdown ────────────────────────────────
 	srv := &http.Server{

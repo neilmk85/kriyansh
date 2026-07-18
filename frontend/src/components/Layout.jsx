@@ -5,7 +5,7 @@ import {
   UserCog, Receipt, Menu, X, LogOut, ChevronRight, Settings2,
   Gift, Package, BadgeCheck, Megaphone, BarChart2, Zap,
   MessageCircle, Send, Layers, ChevronDown, ShoppingBag, PieChart, FileText, Clock,
-  ShoppingCart
+  ShoppingCart, MonitorSmartphone
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { cn, initials } from '@/lib/utils'
@@ -14,7 +14,8 @@ import api from '@/lib/api'
 // Nav items — groups use a `children` array instead of `to`
 const NAV = [
   { to: '/',             icon: LayoutDashboard, label: 'Dashboard'    },
-  { to: '/appointments', icon: Calendar,        label: 'Appointments' },
+  { to: '/appointments', icon: Calendar,           label: 'Appointments'   },
+  { to: '/queue',        icon: MonitorSmartphone,  label: 'Walk-in Queue'  },
   // ── Clients ─────────────────────────────────────────────────────────────
   {
     group: 'Clients',

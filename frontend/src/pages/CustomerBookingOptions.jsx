@@ -26,7 +26,7 @@ const OPTIONS = [
     sub: 'Treat yourself or a friend to future visits',
     icon: Gift,
     route: '/gift',
-    gradient: 'linear-gradient(135deg, #7C3AED 0%, #EC4899 100%)',
+    gradient: 'linear-gradient(135deg, #0891B2 0%, #6366F1 100%)',
     primary: false,
   },
 ]

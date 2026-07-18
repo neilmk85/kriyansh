@@ -445,6 +445,27 @@ func Migrate(db *sql.DB) error {
 			INDEX idx_sms_appt (appointment_id, job_type),
 			INDEX idx_sms_salon (salon_id)
 		)`,
+		// ── Walk-in Queue ─────────────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS walk_in_queue (
+		    id                   INT PRIMARY KEY AUTO_INCREMENT,
+		    salon_id             INT NOT NULL,
+		    client_id            INT DEFAULT NULL,
+		    name                 VARCHAR(255) NOT NULL,
+		    phone                VARCHAR(20) NOT NULL,
+		    service_ids          TEXT DEFAULT '',
+		    service_names        TEXT DEFAULT '',
+		    preferred_staff_id   INT DEFAULT NULL,
+		    preferred_staff_name VARCHAR(255) DEFAULT '',
+		    assigned_staff_id    INT DEFAULT NULL,
+		    assigned_staff_name  VARCHAR(255) DEFAULT '',
+		    status               ENUM('waiting','in_service','completed','cancelled','no_show') DEFAULT 'waiting',
+		    notes                TEXT DEFAULT '',
+		    checked_in_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		    started_at           TIMESTAMP NULL,
+		    completed_at         TIMESTAMP NULL,
+		    INDEX idx_salon_status (salon_id, status),
+		    INDEX idx_salon_date   (salon_id, checked_in_at)
+		)`,
 	}
 
 	for _, stmt := range statements {
@@ -487,6 +508,9 @@ func Migrate(db *sql.DB) error {
 		// Customer portal auth
 		{"clients",          "password_hash",              "VARCHAR(255) NULL"},
 		{"clients",          "portal_enabled",             "TINYINT DEFAULT 0"},
+		// Deposit capture
+		{"appointments",     "payment_intent_id",          "VARCHAR(255) DEFAULT ''"},
+		{"appointments",     "deposit_charged",            "TINYINT DEFAULT 0"},
 	}
 	for _, m := range colMigrations {
 		if err := addColumnIfNotExists(db, m.table, m.column, m.def); err != nil {

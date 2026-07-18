@@ -58,9 +58,7 @@ export default function CustomerBooking() {
   const navigate = useNavigate()
   const location = useLocation()
   const preSelectedStaffId = location.state?.staffId ?? null
-  const STEPS = preSelectedStaffId != null
-    ? ['Services', 'Date & Time', 'Confirm']
-    : ['Staff', 'Date & Time', 'Confirm']
+  const STEPS = ['Services', 'Date & Time', 'Stylist', 'Confirm']
 
   const [cart, setCart] = useState(location.state?.cart || [])
   const [editingServices, setEditingServices] = useState(false)
@@ -106,7 +104,7 @@ export default function CustomerBooking() {
     [services]
   )
 
-  const effectiveStaffId = preSelectedStaffId != null ? preSelectedStaffId : (selectedStaff ?? 0)
+  const effectiveStaffId = selectedStaff ?? 0
   const dateStr = selectedDay ? toDateStr(viewYear, viewMonth, selectedDay) : ''
 
   const { data: slots = [], isFetching: slotsLoading } = useQuery({
@@ -186,20 +184,15 @@ export default function CustomerBooking() {
   }
 
   function canNext() {
-    if (preSelectedStaffId != null) {
-      if (step === 0) return cart.length > 0
-      if (step === 1) return selectedDay && selectedSlot
-      if (step === 2) return depositAmt === 0 || depositPaid
-      return true
-    }
-    if (step === 0) return selectedStaff !== null
+    if (step === 0) return cart.length > 0
     if (step === 1) return selectedDay && selectedSlot
-    if (step === 2) return depositAmt === 0 || depositPaid
+    if (step === 2) return true
+    if (step === 3) return depositAmt === 0 || depositPaid
     return true
   }
 
   function handleNext() {
-    if (step < 2) { setStep(s => s + 1); return }
+    if (step < 3) { setStep(s => s + 1); return }
     setBookError('')
     const customer = (() => {
       try { return JSON.parse(localStorage.getItem('salonos_customer')) || {} }
@@ -311,7 +304,8 @@ export default function CustomerBooking() {
 
       <div className="max-w-2xl mx-auto px-4 pt-5 pb-32">
 
-        {/* ── Services summary pill ───────────────────── */}
+        {/* ── Services summary pill (hidden on step 0 — that step IS service selection) */}
+        {step > 0 && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm mb-5 overflow-hidden">
           <div className="px-4 py-3 flex items-center justify-between">
             <div className="flex gap-1.5 flex-wrap flex-1 min-w-0 mr-3">
@@ -383,6 +377,7 @@ export default function CustomerBooking() {
             </div>
           )}
         </div>
+        )}
 
         {/* ── Step label ─────────────────────────────── */}
         <div className="mb-4">
@@ -392,29 +387,9 @@ export default function CustomerBooking() {
           <h2 className="text-[22px] font-black text-slate-900">{STEPS[step]}</h2>
         </div>
 
-        {/* ══ STEP 0 — Services (book-with flow) ════════ */}
-        {step === 0 && preSelectedStaffId != null && (
+        {/* ══ STEP 0 — Services ═══════════════════════ */}
+        {step === 0 && (
           <div className="space-y-3">
-            {(() => {
-              const member = staffList.find(s => s.id === preSelectedStaffId)
-              return member ? (
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3 px-4 py-3">
-                  <div className="w-10 h-10 rounded-xl shrink-0 flex items-center justify-center"
-                    style={{ background: member.color || 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}>
-                    <User size={18} className="text-white" />
-                  </div>
-                  <div>
-                    <div className="text-[13px] font-bold text-slate-800">{member.name}</div>
-                    <div className="text-[11px] text-slate-400">{member.specialization}</div>
-                  </div>
-                  <div className="ml-auto shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold text-white"
-                    style={{ background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}>
-                    Selected
-                  </div>
-                </div>
-              ) : null
-            })()}
-
             <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
               {categories.map(cat => (
                 <button key={cat} onClick={() => setSvcCategory(cat)}
@@ -442,9 +417,7 @@ export default function CustomerBooking() {
                   <button key={svc.id} onClick={() => toggleService(svc)}
                     className={`w-full flex items-center justify-between px-4 py-4 text-left transition-colors ${inCart ? 'bg-teal-50/60' : 'hover:bg-slate-50/60'}`}>
                     <div className="flex-1 min-w-0 pr-4">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[14px] font-semibold text-slate-800">{svc.name}</span>
-                      </div>
+                      <span className="text-[14px] font-semibold text-slate-800">{svc.name}</span>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="flex items-center gap-1 text-[12px] text-slate-500">
                           <Clock size={10} className="text-slate-400" />~{svc.duration_min} min
@@ -463,8 +436,8 @@ export default function CustomerBooking() {
           </div>
         )}
 
-        {/* ══ STEP 0 — Staff (normal flow) ════════════ */}
-        {step === 0 && preSelectedStaffId == null && (
+        {/* ══ STEP 2 — Stylist ════════════════════════ */}
+        {step === 2 && (
           <div className="space-y-3">
             {staffList.map(member => (
               <button key={member.id} onClick={() => setSelectedStaff(member.id)}
@@ -560,8 +533,8 @@ export default function CustomerBooking() {
           </div>
         )}
 
-        {/* ══ STEP 2 — Confirm ════════════════════════ */}
-        {step === 2 && (
+        {/* ══ STEP 3 — Confirm ════════════════════════ */}
+        {step === 3 && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-50">
               {cart.map(svc => (
@@ -722,7 +695,8 @@ export default function CustomerBooking() {
             {bookMutation.isPending
               ? 'Confirming…'
               : step === 0 ? 'Choose Date & Time →'
-              : step === 1 ? 'Review Booking →'
+              : step === 1 ? 'Choose Stylist →'
+              : step === 2 ? 'Review Booking →'
               : 'Confirm Booking'}
           </button>
         </div>

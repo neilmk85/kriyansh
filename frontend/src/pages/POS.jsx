@@ -999,6 +999,22 @@ function Pill({ active, onClick, children }) {
 // ── Receipt screen ─────────────────────────────────────────────────────────────
 function ReceiptScreen({ receipt, onDone }) {
   const [refundState, setRefundState] = useState('idle')
+  const [textPayState, setTextPayState] = useState('idle') // 'idle' | 'sending' | 'sent' | 'error'
+  const [textPayMsg, setTextPayMsg]   = useState('')
+
+  async function handleTextToPay() {
+    if (!receipt.transaction_id) return
+    setTextPayState('sending')
+    setTextPayMsg('')
+    try {
+      const res = await api.post(`/transactions/${receipt.transaction_id}/payment-link`, {})
+      setTextPayState('sent')
+      setTextPayMsg(`Payment link sent to ${res.data?.phone || 'client'}`)
+    } catch (err) {
+      setTextPayState('error')
+      setTextPayMsg(err?.response?.data?.error || 'Failed to send payment link.')
+    }
+  }
 
   if (refundState === 'done') {
     return (
@@ -1074,9 +1090,26 @@ function ReceiptScreen({ receipt, onDone }) {
             <p className="text-[12px] opacity-90">Balance: {loyaltyData.balance} pts · {loyaltyData.tier} tier</p>
           </div>
         )}
-        <button onClick={onDone} className="w-full py-2.5 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors mb-3">
+        <button onClick={onDone} className="w-full py-2.5 rounded-xl border border-slate-200 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors mb-2">
           New Transaction
         </button>
+        {receipt.client && receipt.transaction_id && (
+          <div className="mb-3">
+            <button
+              onClick={handleTextToPay}
+              disabled={textPayState === 'sending' || textPayState === 'sent'}
+              className="w-full py-2.5 rounded-xl border border-[#0D9488] text-[#0D9488] text-[13px] font-semibold hover:bg-[#F0FDFA] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            >
+              <Smartphone size={14} />
+              {textPayState === 'sending' ? 'Sending…' : textPayState === 'sent' ? 'Link Sent!' : 'Text to Pay'}
+            </button>
+            {textPayMsg && (
+              <p className={`text-[11px] mt-1.5 text-center ${textPayState === 'sent' ? 'text-[#0D9488]' : 'text-red-500'}`}>
+                {textPayMsg}
+              </p>
+            )}
+          </div>
+        )}
         {refundState === 'idle' && (
           <button onClick={() => setRefundState('confirm')} className="text-red-400 text-[12px] hover:text-red-600 transition-colors">
             Process Refund

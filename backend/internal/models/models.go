@@ -89,17 +89,18 @@ type StaffProfile struct {
 }
 
 type Appointment struct {
-	ID            uint      `json:"id"`
-	SalonID       uint      `json:"salon_id"`
-	ClientID      uint      `json:"client_id"`
-	StaffID       uint      `json:"staff_id"`
-	StartAt       time.Time `json:"start_at"`
-	EndAt         time.Time `json:"end_at"`
-	Status        string    `json:"status"`
-	Notes         string    `json:"notes"`
-	DepositPaid   float64   `json:"deposit_paid"`
-	Source        string    `json:"source"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              uint      `json:"id"`
+	SalonID         uint      `json:"salon_id"`
+	ClientID        uint      `json:"client_id"`
+	StaffID         uint      `json:"staff_id"`
+	StartAt         time.Time `json:"start_at"`
+	EndAt           time.Time `json:"end_at"`
+	Status          string    `json:"status"`
+	Notes           string    `json:"notes"`
+	DepositPaid     float64   `json:"deposit_paid"`
+	DepositCharged  int       `json:"deposit_charged"`
+	Source          string    `json:"source"`
+	CreatedAt       time.Time `json:"created_at"`
 	// Joined fields
 	ClientName    string    `json:"client_name,omitempty"`
 	ClientPhone   string    `json:"client_phone,omitempty"`

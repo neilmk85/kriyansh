@@ -660,6 +660,18 @@ function ApptCard({ appt, risk, expanded, onToggle, onStatusChange, onCheckIn, o
           )}>
             {isNew ? 'New client' : 'Returning'}
           </span>
+          {appt.status === 'no_show' && appt.deposit_paid > 0 && (
+            <span className={cn(
+              'inline-block ml-1 mt-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+              appt.deposit_charged
+                ? 'bg-green-100 text-green-700'
+                : 'bg-amber-100 text-amber-700'
+            )}>
+              {appt.deposit_charged
+                ? `Deposit charged $${appt.deposit_paid.toFixed(2)}`
+                : 'Deposit not charged'}
+            </span>
+          )}
         </div>
       </div>
 
