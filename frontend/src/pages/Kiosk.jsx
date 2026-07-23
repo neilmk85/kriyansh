@@ -85,8 +85,8 @@ function WelcomeStep({ onNext }) { // onNext(mode: 'walkin'|'appointment')
       <div
         className="absolute top-1/3 right-24 w-56 h-56 rounded-full pointer-events-none"
         style={{
-          background: 'radial-gradient(circle, rgba(13,148,136,0.12) 0%, transparent 70%)',
-          boxShadow: '0 0 80px 40px rgba(13,148,136,0.08)',
+          background: 'radial-gradient(circle, rgba(99,102,241,0.22) 0%, transparent 70%)',
+          boxShadow: '0 0 80px 40px rgba(99,102,241,0.13)',
         }}
       />
 
@@ -397,6 +397,92 @@ function NameStep({ lookup, name, setName, onNext, onBack }) {
           }}
         >
           Next <ArrowRight size={22} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Step: Returning Customer ────────────────────────────────────────────────
+
+function ReturningStep({ lookup, onNext, onBack }) {
+  return (
+    <div className="min-h-screen flex flex-col" style={DARK_BG}>
+      <div
+        className="absolute top-[-60px] left-[-60px] w-80 h-80 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(13,148,136,0.22) 0%, transparent 70%)' }}
+      />
+      <div
+        className="absolute bottom-[-60px] right-[-60px] w-72 h-72 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
+      />
+
+      <div className="flex items-center px-8 pt-8 pb-4">
+        <button
+          onClick={onBack}
+          className="flex items-center justify-center w-14 h-14 rounded-2xl transition-all duration-300 hover:scale-105 active:scale-95"
+          style={GLASS_CARD}
+        >
+          <ChevronLeft size={28} color="white" />
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center px-12 pb-16 max-w-xl mx-auto w-full">
+        {/* Avatar */}
+        <div
+          className="w-28 h-28 rounded-full flex items-center justify-center mb-8"
+          style={{
+            background: 'linear-gradient(135deg, rgba(13,148,136,0.4), rgba(99,102,241,0.4))',
+            border: '2px solid rgba(13,148,136,0.6)',
+            boxShadow: '0 0 60px rgba(13,148,136,0.35)',
+          }}
+        >
+          <User size={52} style={{ color: '#5EEAD4' }} />
+        </div>
+
+        <h2
+          className="text-5xl font-bold text-white mb-3 text-center"
+          style={{ fontFamily: "'Georgia', serif" }}
+        >
+          Welcome back, {lookup.first_name}! 👋
+        </h2>
+        <p className="text-xl text-center mb-10" style={MUTED}>
+          Great to see you again.
+        </p>
+
+        {/* Profile card */}
+        <div
+          className="w-full rounded-2xl px-8 py-6 mb-10 flex items-center gap-5"
+          style={{
+            background: 'rgba(13,148,136,0.12)',
+            border: '1.5px solid rgba(13,148,136,0.4)',
+            boxShadow: '0 0 32px rgba(13,148,136,0.18)',
+          }}
+        >
+          <div
+            className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #0D9488, #6366F1)' }}
+          >
+            <Check size={26} color="white" />
+          </div>
+          <div>
+            <p className="text-white text-2xl font-semibold">
+              {lookup.first_name} {lookup.last_name}
+            </p>
+            <p className="text-base mt-1" style={{ color: '#5EEAD4' }}>Profile found · All set!</p>
+          </div>
+        </div>
+
+        <button
+          onClick={onNext}
+          className="w-full py-5 rounded-2xl text-white text-xl font-semibold tracking-wide transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+          style={{
+            ...PRIMARY_BTN,
+            boxShadow: '0 0 36px rgba(13,148,136,0.45)',
+            minHeight: 72,
+          }}
+        >
+          Continue <ArrowRight size={22} />
         </button>
       </div>
     </div>
@@ -840,7 +926,7 @@ function DoneStep({ checkedInName, onReset }) {
 
 // ─── Step: Appointment List ───────────────────────────────────────────────────
 
-function AppointmentListStep({ appointments, loading, onCheckin, onBack }) {
+function AppointmentListStep({ appointments, loading, onCheckin, onBack, lookup }) {
   const [checkingIn, setCheckingIn] = useState(null)
 
   async function handleCheckin(appt) {
@@ -872,8 +958,19 @@ function AppointmentListStep({ appointments, loading, onCheckin, onBack }) {
 
       <div className="flex-1 flex flex-col items-center px-8 pb-12">
         <div className="text-center mb-10 mt-2">
-          <h2 className="text-4xl font-bold text-white mb-2">Your Appointments Today</h2>
-          <p className="text-xl" style={MUTED}>Tap an appointment to check in</p>
+          {lookup?.found ? (
+            <>
+              <h2 className="text-4xl font-bold text-white mb-2">
+                Welcome back, {lookup.first_name}! 👋
+              </h2>
+              <p className="text-xl" style={MUTED}>Tap your appointment below to check in</p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-4xl font-bold text-white mb-2">Your Appointments Today</h2>
+              <p className="text-xl" style={MUTED}>Tap an appointment to check in</p>
+            </>
+          )}
         </div>
 
         {loading && (
@@ -1002,13 +1099,23 @@ export default function Kiosk() {
   const handlePhoneNext = async () => {
     if (mode === 'appointment') {
       setApptLoading(true)
+      // Look up customer name alongside appointments
+      const [apptRes, lookupRes] = await Promise.allSettled([
+        fetch(`/api/public/appointments/today?phone=${phone}`),
+        fetch(`/api/public/walkin/lookup?phone=${phone}`),
+      ])
+      if (lookupRes.status === 'fulfilled' && lookupRes.value.ok) {
+        const data = await lookupRes.value.json()
+        setLookup(data)
+        if (data.found) setName({ first: data.first_name || '', last: data.last_name || '' })
+      }
+      if (apptRes.status === 'fulfilled' && apptRes.value.ok) {
+        setAppointments(await apptRes.value.json())
+      } else {
+        setAppointments([])
+      }
+      setApptLoading(false)
       setStep('appt-list')
-      try {
-        const res = await fetch(`/api/public/appointments/today?phone=${phone}`)
-        if (res.ok) setAppointments(await res.json())
-        else setAppointments([])
-      } catch { setAppointments([]) }
-      finally { setApptLoading(false) }
       return
     }
     // walkin mode
@@ -1018,14 +1125,23 @@ export default function Kiosk() {
       if (res.ok) {
         const data = await res.json()
         setLookup(data)
-        if (data.found) setName({ first: data.first_name || '', last: data.last_name || '' })
+        if (data.found) {
+          // Returning customer — skip name step, go straight to services
+          setName({ first: data.first_name || '', last: data.last_name || '' })
+          fetchServices()
+          setStep('returning')
+        } else {
+          setStep('name')
+        }
       } else {
         setLookup({ found: false })
+        setStep('name')
       }
-    } catch { setLookup({ found: false }) }
-    finally {
-      setLookupLoading(false)
+    } catch {
+      setLookup({ found: false })
       setStep('name')
+    } finally {
+      setLookupLoading(false)
     }
   }
 
@@ -1088,6 +1204,8 @@ export default function Kiosk() {
     setCheckedInName('')
     setSubmitting(false)
     setAppointments([])
+    setLookupLoading(false)
+    setApptLoading(false)
   }, [])
 
   // ── Render steps ──
@@ -1101,7 +1219,18 @@ export default function Kiosk() {
       <AppointmentListStep
         appointments={appointments}
         loading={apptLoading}
+        lookup={lookup}
         onCheckin={handleAppointmentCheckin}
+        onBack={() => setStep('phone')}
+      />
+    )
+  }
+
+  if (step === 'returning') {
+    return (
+      <ReturningStep
+        lookup={lookup}
+        onNext={() => { fetchServices(); setStep('services') }}
         onBack={() => setStep('phone')}
       />
     )
