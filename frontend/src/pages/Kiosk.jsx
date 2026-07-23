@@ -754,7 +754,7 @@ function ServicesStep({ services, selectedIds, setSelectedIds, onNext, onSkip, o
         </div>
 
         {/* Category pills */}
-        <div className="flex gap-3 overflow-x-auto pb-2 mb-6 scrollbar-hide">
+        <div className="flex gap-3 pb-2 mb-6 scrollbar-hide" style={{ overflowX: 'auto', overflowY: 'visible', minHeight: 52 }}>
           {categories.map(cat => {
             const active = activeCategory === cat
             return (
