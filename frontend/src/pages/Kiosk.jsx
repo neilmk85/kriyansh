@@ -403,9 +403,12 @@ function NameStep({ lookup, name, setName, onNext, onBack }) {
   )
 }
 
-// ─── Step: Returning Customer ────────────────────────────────────────────────
+// ─── Step: SMS Consent (TCPA) ─────────────────────────────────────────────────
 
-function ReturningStep({ lookup, onNext, onBack }) {
+function ConsentStep({ lookup, name, phone, mode, smsConsent, setSmsConsent, onNext, onBack }) {
+  const isReturning = lookup?.found === true
+  const last4 = phone.slice(-4).padStart(4, '·')
+
   return (
     <div className="min-h-screen flex flex-col" style={DARK_BG}>
       <div
@@ -427,62 +430,242 @@ function ReturningStep({ lookup, onNext, onBack }) {
         </button>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-12 pb-16 max-w-xl mx-auto w-full">
-        {/* Avatar */}
-        <div
-          className="w-28 h-28 rounded-full flex items-center justify-center mb-8"
-          style={{
-            background: 'linear-gradient(135deg, rgba(13,148,136,0.4), rgba(99,102,241,0.4))',
-            border: '2px solid rgba(13,148,136,0.6)',
-            boxShadow: '0 0 60px rgba(13,148,136,0.35)',
-          }}
-        >
-          <User size={52} style={{ color: '#5EEAD4' }} />
-        </div>
-
-        <h2
-          className="text-5xl font-bold text-white mb-3 text-center"
-          style={{ fontFamily: "'Georgia', serif" }}
-        >
-          Welcome back, {lookup.first_name}! 👋
-        </h2>
-        <p className="text-xl text-center mb-10" style={MUTED}>
-          Great to see you again.
-        </p>
-
-        {/* Profile card */}
-        <div
-          className="w-full rounded-2xl px-8 py-6 mb-10 flex items-center gap-5"
-          style={{
-            background: 'rgba(13,148,136,0.12)',
-            border: '1.5px solid rgba(13,148,136,0.4)',
-            boxShadow: '0 0 32px rgba(13,148,136,0.18)',
-          }}
-        >
-          <div
-            className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #0D9488, #6366F1)' }}
-          >
-            <Check size={26} color="white" />
-          </div>
-          <div>
-            <p className="text-white text-2xl font-semibold">
-              {lookup.first_name} {lookup.last_name}
+      <div className="flex-1 flex flex-col items-center justify-center px-12 pb-12 max-w-xl mx-auto w-full">
+        {isReturning && (
+          <>
+            <div
+              className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
+              style={{
+                background: 'linear-gradient(135deg, rgba(13,148,136,0.4), rgba(99,102,241,0.4))',
+                border: '2px solid rgba(13,148,136,0.6)',
+                boxShadow: '0 0 50px rgba(13,148,136,0.35)',
+              }}
+            >
+              <User size={44} style={{ color: '#5EEAD4' }} />
+            </div>
+            <h2 className="text-4xl font-bold text-white mb-2 text-center">
+              Welcome back, {lookup.first_name}! 👋
+            </h2>
+            <p className="text-base mb-6 text-center" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              📞 ****{last4}
             </p>
-            <p className="text-base mt-1" style={{ color: '#5EEAD4' }}>Profile found · All set!</p>
+          </>
+        )}
+
+        {/* TCPA Consent card */}
+        <div
+          className="w-full rounded-2xl px-7 py-6 mb-7"
+          style={{ ...GLASS_CARD, border: '1px solid rgba(255,255,255,0.12)' }}
+        >
+          <h3 className="text-2xl font-bold text-white mb-3">Before we continue…</h3>
+          <p className="text-sm leading-relaxed mb-6" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            By providing my phone number I consent to receive text messages sent by an automatic telephone dialing system.
+            Message frequency varies. Message &amp; data rates may apply.
+            Reply STOP to unsubscribe or HELP for help.
+          </p>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => setSmsConsent(true)}
+              className="w-full rounded-xl px-5 py-4 flex items-center gap-4 transition-all duration-200"
+              style={{
+                background: smsConsent ? 'rgba(13,148,136,0.18)' : 'rgba(255,255,255,0.06)',
+                border: smsConsent ? '1.5px solid rgba(13,148,136,0.7)' : '1px solid rgba(255,255,255,0.1)',
+                boxShadow: smsConsent ? '0 0 20px rgba(13,148,136,0.2)' : 'none',
+              }}
+            >
+              <div
+                className="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                style={{
+                  borderColor: smsConsent ? '#0D9488' : 'rgba(255,255,255,0.3)',
+                  background: smsConsent ? '#0D9488' : 'transparent',
+                }}
+              >
+                {smsConsent && <Check size={12} color="white" strokeWidth={3} />}
+              </div>
+              <span className="text-white text-lg font-medium">I want to receive text messages</span>
+            </button>
+
+            <button
+              onClick={() => setSmsConsent(false)}
+              className="w-full rounded-xl px-5 py-4 flex items-center gap-4 transition-all duration-200"
+              style={{
+                background: !smsConsent ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.06)',
+                border: !smsConsent ? '1.5px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <div
+                className="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                style={{
+                  borderColor: !smsConsent ? '#6366F1' : 'rgba(255,255,255,0.3)',
+                  background: !smsConsent ? '#6366F1' : 'transparent',
+                }}
+              >
+                {!smsConsent && <Check size={12} color="white" strokeWidth={3} />}
+              </div>
+              <span className="text-white text-lg font-medium">I don't want text messages</span>
+            </button>
           </div>
         </div>
 
         <button
           onClick={onNext}
           className="w-full py-5 rounded-2xl text-white text-xl font-semibold tracking-wide transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
-          style={{
-            ...PRIMARY_BTN,
-            boxShadow: '0 0 36px rgba(13,148,136,0.45)',
-            minHeight: 72,
-          }}
+          style={{ ...PRIMARY_BTN, boxShadow: '0 0 32px rgba(13,148,136,0.4)', minHeight: 72 }}
         >
           Continue <ArrowRight size={22} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Step: Family Members ─────────────────────────────────────────────────────
+
+function FamilyStep({ familyMembers, setFamilyMembers, onNext, onBack, submitting }) {
+  const [adding, setAdding] = useState(false)
+  const [newFirst, setNewFirst] = useState('')
+  const [newLast, setNewLast] = useState('')
+
+  function addMember() {
+    if (!newFirst.trim()) return
+    setFamilyMembers((prev) => [...prev, { first: newFirst.trim(), last: newLast.trim(), serviceIds: [] }])
+    setNewFirst('')
+    setNewLast('')
+    setAdding(false)
+  }
+
+  function removeMember(i) {
+    setFamilyMembers((prev) => prev.filter((_, idx) => idx !== i))
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col" style={DARK_BG}>
+      <div
+        className="absolute top-[-60px] right-[-60px] w-72 h-72 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%)' }}
+      />
+
+      <div className="flex items-center px-8 pt-8 pb-4">
+        <button
+          onClick={onBack}
+          className="flex items-center justify-center w-14 h-14 rounded-2xl transition-all duration-300 hover:scale-105 active:scale-95"
+          style={GLASS_CARD}
+        >
+          <ChevronLeft size={28} color="white" />
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center px-10 pb-12 max-w-xl mx-auto w-full">
+        <div className="text-center mb-8 mt-4">
+          <h2 className="text-4xl font-bold text-white mb-2">Anyone else joining you?</h2>
+          <p className="text-xl" style={MUTED}>Add family members checking in together</p>
+        </div>
+
+        {familyMembers.length > 0 && (
+          <div className="w-full space-y-3 mb-6">
+            {familyMembers.map((m, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-4 rounded-2xl px-6 py-4"
+                style={{ background: 'rgba(13,148,136,0.12)', border: '1px solid rgba(13,148,136,0.35)' }}
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #0D9488, #6366F1)' }}
+                >
+                  <User size={18} color="white" />
+                </div>
+                <span className="text-white text-lg font-medium flex-1">{m.first} {m.last}</span>
+                <button
+                  onClick={() => removeMember(i)}
+                  className="text-2xl leading-none transition-colors hover:text-red-400"
+                  style={{ color: 'rgba(255,255,255,0.4)' }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {adding ? (
+          <div
+            className="w-full rounded-2xl p-6 mb-6 space-y-4"
+            style={{ ...GLASS_CARD, border: '1px solid rgba(255,255,255,0.15)' }}
+          >
+            <input
+              type="text"
+              placeholder="First Name"
+              value={newFirst}
+              onChange={(e) => setNewFirst(e.target.value)}
+              className="w-full rounded-xl px-5 py-4 text-xl text-white placeholder-white/30 outline-none"
+              style={{ ...GLASS_CARD, minHeight: 60 }}
+            />
+            <input
+              type="text"
+              placeholder="Last Name (optional)"
+              value={newLast}
+              onChange={(e) => setNewLast(e.target.value)}
+              className="w-full rounded-xl px-5 py-4 text-xl text-white placeholder-white/30 outline-none"
+              style={{ ...GLASS_CARD, minHeight: 60 }}
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setAdding(false); setNewFirst(''); setNewLast('') }}
+                className="flex-1 py-4 rounded-xl text-lg font-semibold"
+                style={{ ...GLASS_CARD, color: 'rgba(255,255,255,0.6)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={addMember}
+                disabled={!newFirst.trim()}
+                className="flex-1 py-4 rounded-xl text-white text-lg font-semibold"
+                style={{
+                  ...PRIMARY_BTN,
+                  opacity: newFirst.trim() ? 1 : 0.35,
+                  boxShadow: newFirst.trim() ? '0 0 20px rgba(13,148,136,0.35)' : 'none',
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="w-full rounded-2xl py-5 mb-6 flex items-center justify-center gap-3 transition-all duration-300 hover:scale-[1.01] active:scale-[0.99]"
+            style={{
+              ...GLASS_CARD,
+              border: '1.5px dashed rgba(255,255,255,0.2)',
+              color: 'rgba(255,255,255,0.7)',
+              minHeight: 72,
+            }}
+          >
+            <UserPlus size={22} />
+            <span className="text-xl font-semibold">+ Add Family Member</span>
+          </button>
+        )}
+
+        <button
+          onClick={onNext}
+          disabled={submitting}
+          className="w-full py-5 rounded-2xl text-white text-xl font-semibold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+          style={{
+            ...PRIMARY_BTN,
+            opacity: submitting ? 0.6 : 1,
+            boxShadow: '0 0 32px rgba(13,148,136,0.4)',
+            minHeight: 72,
+            marginTop: 'auto',
+          }}
+        >
+          {submitting
+            ? 'Checking in…'
+            : familyMembers.length > 0
+            ? `Check In Everyone (${familyMembers.length + 1})`
+            : 'Check In'}
+          {!submitting && <ArrowRight size={22} />}
         </button>
       </div>
     </div>
@@ -580,9 +763,9 @@ function ServicesStep({ services, selectedIds, setSelectedIds, onNext, onSkip, o
                 onClick={() => setActiveCategory(cat)}
                 className="whitespace-nowrap px-5 py-2.5 rounded-full text-base font-semibold transition-all duration-200 flex-shrink-0"
                 style={{
-                  background: active ? 'linear-gradient(135deg, #0D9488, #6366F1)' : 'rgba(255,255,255,0.08)',
-                  border: active ? '1.5px solid rgba(13,148,136,0.6)' : '1px solid rgba(255,255,255,0.1)',
-                  color: active ? 'white' : 'rgba(255,255,255,0.6)',
+                  background: active ? 'linear-gradient(135deg, #0D9488, #6366F1)' : 'rgba(255,255,255,0.14)',
+                  border: active ? '1.5px solid rgba(13,148,136,0.6)' : '1.5px solid rgba(255,255,255,0.22)',
+                  color: active ? 'white' : 'rgba(255,255,255,0.85)',
                   boxShadow: active ? '0 0 20px rgba(13,148,136,0.35)' : 'none',
                 }}
               >
@@ -1066,6 +1249,8 @@ export default function Kiosk() {
   const [lookupLoading, setLookupLoading] = useState(false)
   const [appointments, setAppointments] = useState([])
   const [apptLoading, setApptLoading] = useState(false)
+  const [smsConsent, setSmsConsent] = useState(true)
+  const [familyMembers, setFamilyMembers] = useState([])
 
   // Fetch services
   const fetchServices = useCallback(async () => {
@@ -1107,7 +1292,10 @@ export default function Kiosk() {
       if (lookupRes.status === 'fulfilled' && lookupRes.value.ok) {
         const data = await lookupRes.value.json()
         setLookup(data)
-        if (data.found) setName({ first: data.first_name || '', last: data.last_name || '' })
+        if (data.found) {
+          setName({ first: data.first_name || '', last: data.last_name || '' })
+          setSmsConsent(data.sms_consent !== false)
+        }
       }
       if (apptRes.status === 'fulfilled' && apptRes.value.ok) {
         setAppointments(await apptRes.value.json())
@@ -1115,7 +1303,7 @@ export default function Kiosk() {
         setAppointments([])
       }
       setApptLoading(false)
-      setStep('appt-list')
+      setStep('consent')
       return
     }
     // walkin mode
@@ -1126,10 +1314,9 @@ export default function Kiosk() {
         const data = await res.json()
         setLookup(data)
         if (data.found) {
-          // Returning customer — skip name step, go straight to services
           setName({ first: data.first_name || '', last: data.last_name || '' })
-          fetchServices()
-          setStep('returning')
+          setSmsConsent(data.sms_consent !== false)
+          setStep('consent')
         } else {
           setStep('name')
         }
@@ -1160,7 +1347,7 @@ export default function Kiosk() {
     }
   }
 
-  // Submit check-in
+  // Submit check-in (primary + family members)
   const handleSubmit = async () => {
     setSubmitting(true)
     const fullName =
@@ -1176,11 +1363,28 @@ export default function Kiosk() {
           phone,
           service_ids: selectedServiceIds,
           preferred_staff_id: selectedStaffId ?? undefined,
+          sms_consent: smsConsent,
         }),
       })
       if (res.ok) {
         const data = await res.json()
         setCheckedInName(data.name || fullName)
+        // Post each family member as a separate queue entry
+        for (const member of familyMembers) {
+          const memberName = `${member.first} ${member.last}`.trim()
+          if (!memberName) continue
+          await fetch('/api/public/walkin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: memberName,
+              phone,
+              service_ids: member.serviceIds || [],
+              preferred_staff_id: selectedStaffId ?? undefined,
+              sms_consent: smsConsent,
+            }),
+          })
+        }
         setStep('done')
       } else {
         alert('Check-in failed. Please try again or see the front desk.')
@@ -1206,6 +1410,8 @@ export default function Kiosk() {
     setAppointments([])
     setLookupLoading(false)
     setApptLoading(false)
+    setSmsConsent(true)
+    setFamilyMembers([])
   }, [])
 
   // ── Render steps ──
@@ -1221,17 +1427,35 @@ export default function Kiosk() {
         loading={apptLoading}
         lookup={lookup}
         onCheckin={handleAppointmentCheckin}
-        onBack={() => setStep('phone')}
+        onBack={() => setStep('consent')}
       />
     )
   }
 
-  if (step === 'returning') {
+  if (step === 'consent') {
     return (
-      <ReturningStep
+      <ConsentStep
         lookup={lookup}
-        onNext={() => { fetchServices(); setStep('services') }}
-        onBack={() => setStep('phone')}
+        name={name}
+        phone={phone}
+        mode={mode}
+        smsConsent={smsConsent}
+        setSmsConsent={setSmsConsent}
+        onNext={() => {
+          if (mode === 'appointment') {
+            setStep('appt-list')
+          } else {
+            fetchServices()
+            setStep('services')
+          }
+        }}
+        onBack={() => {
+          if (mode === 'appointment' || lookup?.found) {
+            setStep('phone')
+          } else {
+            setStep('name')
+          }
+        }}
       />
     )
   }
@@ -1255,7 +1479,7 @@ export default function Kiosk() {
         lookup={lookup}
         name={name}
         setName={setName}
-        onNext={() => { fetchServices(); setStep('services') }}
+        onNext={() => setStep('consent')}
         onBack={() => setStep('phone')}
       />
     )
@@ -1269,7 +1493,7 @@ export default function Kiosk() {
         setSelectedIds={setSelectedServiceIds}
         onNext={() => { fetchStaff(); setStep('staff') }}
         onSkip={() => { setSelectedServiceIds([]); fetchStaff(); setStep('staff') }}
-        onBack={() => setStep('name')}
+        onBack={() => setStep('consent')}
       />
     )
   }
@@ -1280,8 +1504,20 @@ export default function Kiosk() {
         staff={staff}
         selectedStaffId={selectedStaffId}
         setSelectedStaffId={setSelectedStaffId}
-        onNext={handleSubmit}
+        onNext={() => setStep('family')}
         onBack={() => setStep('services')}
+        submitting={false}
+      />
+    )
+  }
+
+  if (step === 'family') {
+    return (
+      <FamilyStep
+        familyMembers={familyMembers}
+        setFamilyMembers={setFamilyMembers}
+        onNext={handleSubmit}
+        onBack={() => setStep('staff')}
         submitting={submitting}
       />
     )

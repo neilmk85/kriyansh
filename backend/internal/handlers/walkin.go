@@ -35,6 +35,7 @@ func (a *App) PublicWalkIn(w http.ResponseWriter, r *http.Request) {
 		ServiceIDs       []uint `json:"service_ids"`
 		PreferredStaffID *uint  `json:"preferred_staff_id"`
 		Notes            string `json:"notes"`
+		SMSConsent       *bool  `json:"sms_consent"`
 	}
 	if err := a.Decode(r, &req); err != nil || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Phone) == "" {
 		a.Error(w, http.StatusBadRequest, "name and phone required")
@@ -47,12 +48,38 @@ func (a *App) PublicWalkIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to find existing client by phone
+	consent := true
+	if req.SMSConsent != nil {
+		consent = *req.SMSConsent
+	}
+
+	// Find or create client by phone
 	var clientID *uint
 	var cid uint
 	if err := a.DB.QueryRowContext(r.Context(),
 		`SELECT id FROM clients WHERE phone=? AND salon_id=? LIMIT 1`, req.Phone, salonID).Scan(&cid); err == nil {
 		clientID = &cid
+		if req.SMSConsent != nil {
+			a.DB.ExecContext(r.Context(),
+				`UPDATE clients SET sms_consent=? WHERE id=? AND salon_id=?`, consent, cid, salonID)
+		}
+	} else {
+		parts := strings.Fields(strings.TrimSpace(req.Name))
+		firstName, lastName := "", ""
+		if len(parts) > 0 {
+			firstName = parts[0]
+		}
+		if len(parts) > 1 {
+			lastName = strings.Join(parts[1:], " ")
+		}
+		res2, err2 := a.DB.ExecContext(r.Context(),
+			`INSERT INTO clients (salon_id, first_name, last_name, phone, sms_consent) VALUES (?, ?, ?, ?, ?)`,
+			salonID, firstName, lastName, strings.TrimSpace(req.Phone), consent)
+		if err2 == nil {
+			newID, _ := res2.LastInsertId()
+			newCid := uint(newID)
+			clientID = &newCid
+		}
 	}
 
 	// Resolve service names
@@ -107,17 +134,19 @@ func (a *App) PublicWalkInLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var firstName, lastName string
+	var smsConsent bool
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT first_name, last_name FROM clients WHERE phone=? AND salon_id=? LIMIT 1`,
-		phone, salonID).Scan(&firstName, &lastName)
+		`SELECT first_name, last_name, sms_consent FROM clients WHERE phone=? AND salon_id=? LIMIT 1`,
+		phone, salonID).Scan(&firstName, &lastName, &smsConsent)
 	if err != nil {
 		a.JSON(w, http.StatusOK, map[string]any{"found": false})
 		return
 	}
 	a.JSON(w, http.StatusOK, map[string]any{
-		"found":      true,
-		"first_name": firstName,
-		"last_name":  lastName,
+		"found":       true,
+		"first_name":  firstName,
+		"last_name":   lastName,
+		"sms_consent": smsConsent,
 	})
 }
 
