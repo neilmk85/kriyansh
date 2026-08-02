@@ -1289,12 +1289,13 @@ export default function Kiosk() {
         fetch(`/api/public/appointments/today?phone=${phone}`),
         fetch(`/api/public/walkin/lookup?phone=${phone}`),
       ])
+      let fetchedLookup = null
       if (lookupRes.status === 'fulfilled' && lookupRes.value.ok) {
-        const data = await lookupRes.value.json()
-        setLookup(data)
-        if (data.found) {
-          setName({ first: data.first_name || '', last: data.last_name || '' })
-          setSmsConsent(data.sms_consent !== false)
+        fetchedLookup = await lookupRes.value.json()
+        setLookup(fetchedLookup)
+        if (fetchedLookup.found) {
+          setName({ first: fetchedLookup.first_name || '', last: fetchedLookup.last_name || '' })
+          setSmsConsent(fetchedLookup.sms_consent !== false)
         }
       }
       if (apptRes.status === 'fulfilled' && apptRes.value.ok) {
@@ -1303,7 +1304,8 @@ export default function Kiosk() {
         setAppointments([])
       }
       setApptLoading(false)
-      setStep('consent')
+      // Returning customer already has consent on file — go straight to appointments
+      setStep(fetchedLookup?.found ? 'appt-list' : 'consent')
       return
     }
     // walkin mode
@@ -1316,7 +1318,9 @@ export default function Kiosk() {
         if (data.found) {
           setName({ first: data.first_name || '', last: data.last_name || '' })
           setSmsConsent(data.sms_consent !== false)
-          setStep('consent')
+          // Returning customer — skip consent, go straight to services
+          fetchServices()
+          setStep('services')
         } else {
           setStep('name')
         }
