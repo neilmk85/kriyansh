@@ -59,7 +59,7 @@ function Toggle({ on, onChange }) {
 
 /* ── Sections ───────────────────────────────────────────────── */
 function ProfileSection({ onSave, onRefresh }) {
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', gender: '' })
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', gender: '', smsConsent: true })
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -70,12 +70,13 @@ function ProfileSection({ onSave, onRefresh }) {
     fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setForm({
-        firstName: d.first_name || '',
-        lastName:  d.last_name  || '',
-        email:     d.email      || '',
-        phone:     d.phone      || '',
-        dob:       d.dob        || '',
-        gender:    d.gender     || '',
+        firstName:  d.first_name  || '',
+        lastName:   d.last_name   || '',
+        email:      d.email       || '',
+        phone:      d.phone       || '',
+        dob:        d.dob         || '',
+        gender:     d.gender      || '',
+        smsConsent: d.sms_consent ?? true,
       }))
       .catch(() => {})
   }, [])
@@ -94,7 +95,7 @@ function ProfileSection({ onSave, onRefresh }) {
           email:      form.email,
           gender:     form.gender,
           dob:        form.dob,
-          sms_consent: true,
+          sms_consent: form.smsConsent,
         }),
       })
       if (res.ok) {
@@ -256,9 +257,10 @@ function RescheduleCalendar({ item, onClose, onConfirm }) {
   const [rsDay, setRsDay] = useState(null)
   const [rsTime, setRsTime] = useState(null)
 
-  const TODAY_YEAR = 2026
-  const TODAY_MONTH = 5
-  const TODAY_DAY = 14
+  const _today = new Date()
+  const TODAY_YEAR = _today.getFullYear()
+  const TODAY_MONTH = _today.getMonth() + 1
+  const TODAY_DAY = _today.getDate()
 
   const firstDow = new Date(rsYear, rsMonth, 1).getDay()
   const daysInMonth = new Date(rsYear, rsMonth + 1, 0).getDate()
@@ -566,11 +568,7 @@ function ActivitySection({ navigate, onSave }) {
     })
     localStorage.setItem('ks_reviews', JSON.stringify(existingReviews))
 
-    setItems(prev => {
-      const updated = prev.map(a => a.id === item.id ? { ...a, reviewed: true } : a)
-      persistNonStatic(updated)
-      return updated
-    })
+    setItems(prev => prev.map(a => a.id === item.id ? { ...a, reviewed: true } : a))
     setReviewItem(null)
   }
 
@@ -1081,7 +1079,31 @@ function MembershipSection() {
 
 function SettingsSection({ onSave, navigate }) {
   const [notifs, setNotifs] = useState({ smsAppt: true, whatsappAppt: true, emailMkt: true, smsMkt: true, whatsappMkt: false })
-  const toggle = k => setNotifs(n => ({ ...n, [k]: !n[k] }))
+
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setNotifs(n => ({ ...n, smsMkt: d.sms_consent ?? true })))
+      .catch(() => {})
+  }, [])
+
+  async function toggle(k) {
+    const next = !notifs[k]
+    setNotifs(n => ({ ...n, [k]: next }))
+    if (k === 'smsMkt') {
+      const token = localStorage.getItem('salonos_customer_token')
+      if (!token) return
+      const profile = await fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => ({}))
+      await fetch('/api/customer/profile', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...profile, sms_consent: next }),
+      }).catch(() => {})
+    }
+    onSave('Preferences saved')
+  }
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
   const [pwError, setPwError] = useState('')
   const [pwSaving, setPwSaving] = useState(false)

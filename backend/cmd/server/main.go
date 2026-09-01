@@ -151,6 +151,8 @@ func main() {
 	mux.Handle("POST /api/clients", auth(http.HandlerFunc(app.CreateClient)))
 	mux.Handle("PUT /api/clients/{id}", auth(http.HandlerFunc(app.UpdateClient)))
 	mux.Handle("POST /api/clients/merge", auth(http.HandlerFunc(app.MergeClients)))
+	mux.Handle("POST /api/clients/import", auth(http.HandlerFunc(app.BulkImportClients)))
+	mux.Handle("GET /api/clients/export", auth(http.HandlerFunc(app.ExportClients)))
 
 	// Staff
 	mux.Handle("GET /api/staff", auth(http.HandlerFunc(app.ListStaff)))

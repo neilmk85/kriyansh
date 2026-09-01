@@ -196,7 +196,7 @@ export default function MembershipForm() {
         await api.post('/membership-plans', payload)
       }
       qc.invalidateQueries(['membership-plans'])
-      navigate('/memberships')
+      navigate('/admin/memberships')
     } catch {
       setError('Failed to save membership. Please try again.')
     } finally {
@@ -214,7 +214,7 @@ export default function MembershipForm() {
       <div className="flex items-center gap-3 mb-6">
         <button
           type="button"
-          onClick={() => navigate('/memberships')}
+          onClick={() => navigate('/admin/memberships')}
           className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium"
         >
           <ChevronLeft size={16} />
@@ -625,7 +625,7 @@ export default function MembershipForm() {
         <div className="flex gap-3 pt-2">
           <button
             type="button"
-            onClick={() => navigate('/memberships')}
+            onClick={() => navigate('/admin/memberships')}
             className="flex-1 py-3 border border-slate-200 rounded-xl text-[14px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
           >
             Cancel

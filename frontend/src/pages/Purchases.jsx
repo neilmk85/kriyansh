@@ -695,7 +695,7 @@ function PurchaseOrdersTab() {
           />
         </div>
         <button
-          onClick={() => navigate('/purchases/new-order')}
+          onClick={() => navigate('/admin/purchases/new-order')}
           className={btn('primary', 'sm')}
           style={{ background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}
         >

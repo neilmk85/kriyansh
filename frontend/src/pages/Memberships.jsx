@@ -54,7 +54,7 @@ export default function Memberships() {
           <p className="text-sm text-slate-500 mt-0.5">Create and manage recurring membership plans</p>
         </div>
         <button
-          onClick={() => navigate('/memberships/add')}
+          onClick={() => navigate('/admin/memberships/add')}
           className="flex items-center gap-2 px-4 py-2 text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] rounded-xl text-sm font-semibold  transition-colors shadow-sm"
         >
           <Plus size={16} />
@@ -96,7 +96,7 @@ export default function Memberships() {
           </p>
           {tab !== 'inactive' && (
             <button
-              onClick={() => navigate('/memberships/add')}
+              onClick={() => navigate('/admin/memberships/add')}
               className="mt-4 px-4 py-2 text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] rounded-xl text-sm font-semibold  transition-colors"
             >
               + Create First Plan

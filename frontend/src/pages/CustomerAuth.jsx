@@ -128,7 +128,7 @@ export default function CustomerAuth() {
         <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(10,10,20,0.65) 0%, rgba(10,10,20,0.10) 40%, rgba(10,10,20,0.70) 100%)' }} />
 
         <div className="relative z-10 flex items-center justify-between">
-          <button onClick={() => navigate('/welcome')}
+          <button onClick={() => navigate('/')}
             className="flex items-center gap-2 text-white/70 hover:text-white transition-colors text-[14px] font-medium">
             <ArrowLeft size={16} /> Back to home
           </button>
@@ -208,7 +208,7 @@ export default function CustomerAuth() {
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-white relative">
 
         {/* Mobile back button */}
-        <button onClick={() => navigate('/welcome')}
+        <button onClick={() => navigate('/')}
           className="md:hidden absolute top-6 left-6 flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors text-[14px] font-medium">
           <ArrowLeft size={16} /> Home
         </button>

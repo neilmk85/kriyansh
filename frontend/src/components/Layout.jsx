@@ -13,17 +13,17 @@ import api from '@/lib/api'
 
 // Nav items — groups use a `children` array instead of `to`
 const NAV = [
-  { to: '/',             icon: LayoutDashboard, label: 'Dashboard'    },
-  { to: '/appointments', icon: Calendar,           label: 'Appointments'   },
-  { to: '/queue',        icon: MonitorSmartphone,  label: 'Walk-in Queue'  },
+  { to: '/admin',             icon: LayoutDashboard, label: 'Dashboard'    },
+  { to: '/admin/appointments', icon: Calendar,           label: 'Appointments'   },
+  { to: '/admin/queue',        icon: MonitorSmartphone,  label: 'Walk-in Queue'  },
   // ── Clients ─────────────────────────────────────────────────────────────
   {
     group: 'Clients',
     icon: Users,
     children: [
-      { to: '/clients',          icon: Users,    label: 'Clients list'    },
-      { to: '/clients/segments', icon: PieChart, label: 'Client segments' },
-      { to: '/loyalty',          icon: Gift,     label: 'Client loyalty'  },
+      { to: '/admin/clients',          icon: Users,    label: 'Clients list'    },
+      { to: '/admin/clients/segments', icon: PieChart, label: 'Client segments' },
+      { to: '/admin/loyalty',          icon: Gift,     label: 'Client loyalty'  },
     ],
   },
   // ── Team ─────────────────────────────────────────────────────────────────
@@ -31,10 +31,10 @@ const NAV = [
     group: 'Team',
     icon: UserCog,
     children: [
-      { to: '/staff',            icon: Users,    label: 'Team members'     },
-      { to: '/staff/shifts',     icon: Calendar, label: 'Scheduled shifts' },
-      { to: '/staff/timesheets', icon: Clock,    label: 'Timesheets'       },
-      { to: '/staff/payrun',     icon: Receipt,  label: 'Pay runs'         },
+      { to: '/admin/staff',            icon: Users,    label: 'Team members'     },
+      { to: '/admin/staff/shifts',     icon: Calendar, label: 'Scheduled shifts' },
+      { to: '/admin/staff/timesheets', icon: Clock,    label: 'Timesheets'       },
+      { to: '/admin/staff/payrun',     icon: Receipt,  label: 'Pay runs'         },
     ],
   },
   // ── Catalogue ────────────────────────────────────────────────────────────
@@ -42,11 +42,11 @@ const NAV = [
     group: 'Catalogue',
     icon: ShoppingBag,
     children: [
-      { to: '/services',    icon: Scissors,   label: 'Services'    },
-      { to: '/memberships', icon: BadgeCheck, label: 'Memberships' },
-      { to: '/packages',    icon: Layers,     label: 'Packages'    },
-      { to: '/gift-cards',  icon: Gift,       label: 'Gift Cards'  },
-      { to: '/products',    icon: Package,    label: 'Products'    },
+      { to: '/admin/services',    icon: Scissors,   label: 'Services'    },
+      { to: '/admin/memberships', icon: BadgeCheck, label: 'Memberships' },
+      { to: '/admin/packages',    icon: Layers,     label: 'Packages'    },
+      { to: '/admin/gift-cards',  icon: Gift,       label: 'Gift Cards'  },
+      { to: '/admin/products',    icon: Package,    label: 'Products'    },
     ],
   },
   // ── Sales & Marketing ────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ const NAV = [
     group: 'Sales & Marketing',
     icon: Megaphone,
     children: [
-      { to: '/marketing', icon: Megaphone, label: 'Marketing' },
+      { to: '/admin/marketing', icon: Megaphone, label: 'Marketing' },
     ],
   },
   // ── Operations ───────────────────────────────────────────────────────────
@@ -62,25 +62,25 @@ const NAV = [
     group: 'Operations',
     icon: BarChart2,
     children: [
-      { to: '/inventory',         icon: Package,       label: 'Inventory'   },
-      { to: '/purchases',         icon: ShoppingCart,  label: 'Purchases'   },
-      { to: '/staff-performance', icon: BarChart2,     label: 'Performance' },
-      { to: '/optimizer',         icon: Zap,           label: 'Optimizer'   },
-      { to: '/forms',             icon: FileText,      label: 'Intake Forms' },
-      { to: '/reports',           icon: PieChart,      label: 'Reports'     },
+      { to: '/admin/inventory',         icon: Package,       label: 'Inventory'   },
+      { to: '/admin/purchases',         icon: ShoppingCart,  label: 'Purchases'   },
+      { to: '/admin/staff-performance', icon: BarChart2,     label: 'Performance' },
+      { to: '/admin/optimizer',         icon: Zap,           label: 'Optimizer'   },
+      { to: '/admin/forms',             icon: FileText,      label: 'Intake Forms' },
+      { to: '/admin/reports',           icon: PieChart,      label: 'Reports'     },
     ],
   },
   // ─────────────────────────────────────────────────────────────────────────
-  { to: '/pos',      icon: Receipt,  label: 'POS / Billing' },
-  { to: '/settings', icon: Settings2, label: 'Settings'     },
+  { to: '/admin/pos',      icon: Receipt,  label: 'POS / Billing' },
+  { to: '/admin/settings', icon: Settings2, label: 'Settings'     },
 ]
 
 const GROUP_PATHS = {
-  'Team':              ['/staff', '/staff/shifts', '/staff/timesheets', '/staff/payrun'],
-  'Clients':           ['/clients', '/clients/segments', '/loyalty'],
-  'Catalogue':         ['/services', '/memberships', '/packages', '/gift-cards', '/products'],
-  'Sales & Marketing': ['/marketing'],
-  'Operations':        ['/inventory', '/purchases', '/staff-performance', '/optimizer', '/forms', '/reports'],
+  'Team':              ['/admin/staff', '/admin/staff/shifts', '/admin/staff/timesheets', '/admin/staff/payrun'],
+  'Clients':           ['/admin/clients', '/admin/clients/segments', '/admin/loyalty'],
+  'Catalogue':         ['/admin/services', '/admin/memberships', '/admin/packages', '/admin/gift-cards', '/admin/products'],
+  'Sales & Marketing': ['/admin/marketing'],
+  'Operations':        ['/admin/inventory', '/admin/purchases', '/admin/staff-performance', '/admin/optimizer', '/admin/forms', '/admin/reports'],
 }
 
 export default function Layout() {
@@ -88,7 +88,7 @@ export default function Layout() {
   const [open, setOpen]  = useState(true)
   const navigate         = useNavigate()
   const location         = useLocation()
-  const isPos            = location.pathname === '/pos'
+  const isPos            = location.pathname === '/admin/pos'
 
   // Auto-open the group that contains the current path
   const [openGroups, setOpenGroups] = useState(() => {
@@ -156,7 +156,7 @@ export default function Layout() {
             src="/logo.png"
             alt="Kriyansh Beauty Bar"
             className="h-14 w-auto cursor-pointer select-none object-contain"
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/admin')}
           />
           <button
             onClick={() => setOpen(false)}
@@ -174,7 +174,7 @@ export default function Layout() {
               const { group, icon: GroupIcon, children } = item
               const isGroupOpen    = !!openGroups[group]
               const hasActiveChild = children.some(c =>
-                c.to === '/' ? location.pathname === '/' : location.pathname.startsWith(c.to)
+                c.to === '/admin' ? location.pathname === '/admin' : location.pathname.startsWith(c.to)
               )
               return (
                 <div key={group}>

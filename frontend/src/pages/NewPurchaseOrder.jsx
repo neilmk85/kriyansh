@@ -114,7 +114,7 @@ export default function NewPurchaseOrder() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] })
       setToast({ message: `Purchase order ${res.data.po_number} created`, type: 'success' })
-      setTimeout(() => navigate('/purchases'), 1500)
+      setTimeout(() => navigate('/admin/purchases'), 1500)
     },
     onError: () => setToast({ message: 'Failed to create purchase order', type: 'error' }),
   })
@@ -158,7 +158,7 @@ export default function NewPurchaseOrder() {
       {/* Page header */}
       <div className="flex items-center gap-4">
         <button
-          onClick={() => navigate('/purchases')}
+          onClick={() => navigate('/admin/purchases')}
           className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-white border border-slate-200 transition-colors"
         >
           <ArrowLeft size={16} />
@@ -378,7 +378,7 @@ export default function NewPurchaseOrder() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/purchases')}
+                onClick={() => navigate('/admin/purchases')}
                 className="w-full text-center text-[12px] text-slate-400 hover:text-slate-600 py-1 transition-colors"
               >
                 Cancel

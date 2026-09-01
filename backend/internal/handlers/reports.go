@@ -411,8 +411,8 @@ type inventoryReportRow struct {
 	Name         string  `json:"name"`
 	SKU          string  `json:"sku"`
 	Category     string  `json:"category"`
-	Quantity     int     `json:"quantity"`
-	MinQuantity  int     `json:"min_quantity"`
+	Quantity     float64 `json:"quantity"`
+	MinQuantity  float64 `json:"min_quantity"`
 	Status       string  `json:"status"`
 	CostPrice    float64 `json:"cost_price"`
 	SellingPrice float64 `json:"selling_price"`
@@ -425,8 +425,8 @@ func (a *App) ReportInventory(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.DB.QueryContext(ctx,
 		`SELECT id, name, COALESCE(sku,''), COALESCE(category,''),
-		        quantity, min_quantity,
-		        COALESCE(cost_price,0), COALESCE(selling_price,0)
+		        stock_qty, low_stock_threshold,
+		        COALESCE(cost_price,0), COALESCE(retail_price,0)
 		 FROM inventory_items
 		 WHERE salon_id=?
 		 ORDER BY name ASC`, sid)

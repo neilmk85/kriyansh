@@ -71,7 +71,8 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login"   element={<Login />} />
-            <Route path="/welcome" element={<CustomerLanding />} />
+            <Route path="/"        element={<CustomerLanding />} />
+            <Route path="/welcome" element={<Navigate to="/" replace />} />
             <Route path="/auth"    element={<CustomerAuth />} />
             <Route path="/profile" element={<CustomerProfile />} />
             <Route path="/home"    element={<CustomerHome />} />
@@ -85,7 +86,7 @@ export default function App() {
             <Route path="/tv"            element={<TVDisplay />} />
             <Route path="/booking"                    element={<BookingPage />} />
             <Route path="/checkin/:appointmentId"     element={<CheckIn />} />
-            <Route path="/" element={
+            <Route path="/admin" element={
               <ProtectedRoute>
                 <Layout />
               </ProtectedRoute>

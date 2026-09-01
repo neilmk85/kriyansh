@@ -246,7 +246,7 @@ func (a *App) ScheduleGaps(w http.ResponseWriter, r *http.Request) {
 		FROM appointments
 		WHERE salon_id=? AND start_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
 		  AND status NOT IN ('cancelled','no_show')
-		GROUP BY DAYOFWEEK(start_at), HOUR(start_at)`, sid)
+		GROUP BY dow, hour`, sid)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

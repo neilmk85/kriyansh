@@ -165,7 +165,7 @@ export default function CustomerHome() {
       {/* ── Sticky top nav ─────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-100 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-          <button onClick={() => navigate('/welcome')}
+          <button onClick={() => navigate('/')}
             className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors text-[13px]">
             <ArrowLeft size={16} /> Back
           </button>

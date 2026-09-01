@@ -125,14 +125,16 @@ export default function Clients() {
 
                   <OptionsItem
                     icon={FileSpreadsheet}
-                    label="Excel"
-                    onClick={() => { exportClients('xlsx', clients); setOptionsOpen(false) }}
+                    label="All clients (CSV)"
+                    onClick={() => { exportAllClients(); setOptionsOpen(false) }}
                   />
-                  <OptionsItem
-                    icon={FileText}
-                    label="CSV"
-                    onClick={() => { exportClients('csv', clients); setOptionsOpen(false) }}
-                  />
+                  {selected.size > 0 && (
+                    <OptionsItem
+                      icon={FileText}
+                      label={`Selected (${selected.size})`}
+                      onClick={() => { exportClients(rows.filter(r => selected.has(r.id))); setOptionsOpen(false) }}
+                    />
+                  )}
                 </div>
               </>
             )}
@@ -263,26 +265,34 @@ function OptionsItem({ icon: Icon, label, onClick }) {
   )
 }
 
-function exportClients(format, clients) {
-  const headers = ['First Name', 'Last Name', 'Email', 'Phone', 'Total Spend', 'Total Visits', 'Created At']
-  const rows = clients.map(c => [
-    c.first_name, c.last_name, c.email, c.phone,
-    c.total_spend, c.total_visits,
-    new Date(c.created_at).toLocaleDateString('en-GB'),
-  ])
-
-  if (format === 'csv') {
-    const csv = [headers, ...rows].map(r => r.map(v => `"${v ?? ''}"`).join(',')).join('\n')
-    downloadFile(csv, 'clients.csv', 'text/csv')
-  } else {
-    // Simple TSV wrapped as xls
-    const tsv = [headers, ...rows].map(r => r.join('\t')).join('\n')
-    downloadFile(tsv, 'clients.xls', 'application/vnd.ms-excel')
-  }
+// Full server-side export (all clients, all fields)
+async function exportAllClients() {
+  const token = localStorage.getItem('salonos_token')
+  const res = await fetch('/api/clients/export', { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) { alert('Export failed'); return }
+  const blob = await res.blob()
+  downloadFile(blob, 'clients.csv', 'text/csv', true)
 }
 
-function downloadFile(content, filename, mime) {
-  const blob = new Blob([content], { type: mime })
+// Client-side export of the currently-visible (or selected) rows
+function exportClients(subset) {
+  const headers = [
+    'First Name', 'Last Name', 'Email', 'Phone', 'Gender',
+    'Total Spend', 'Total Visits', 'Loyalty Points', 'SMS Consent', 'Created At',
+  ]
+  const rows = subset.map(c => [
+    c.first_name ?? '', c.last_name ?? '', c.email ?? '', c.phone ?? '',
+    c.gender ?? '',
+    c.total_spend ?? 0, c.total_visits ?? 0, c.loyalty_points ?? 0,
+    c.sms_consent ? 'yes' : 'no',
+    c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : '',
+  ])
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  downloadFile(csv, 'clients.csv', 'text/csv')
+}
+
+function downloadFile(content, filename, mime, isBlob = false) {
+  const blob = isBlob ? content : new Blob([content], { type: mime })
   const url  = URL.createObjectURL(blob)
   const a    = Object.assign(document.createElement('a'), { href: url, download: filename })
   document.body.appendChild(a); a.click()
@@ -574,11 +584,17 @@ function parseCSV(text) {
 
 // ── Import Modal ──────────────────────────────────────────────────────────
 
+const TEMPLATE_CSV = `First Name,Last Name,Email,Phone,Gender,Date of Birth,Notes
+Jane,Doe,jane@example.com,3105550001,female,1990-05-15,VIP client
+John,Smith,john@example.com,3105550002,male,,Referred by Jane`
+
 function ImportModal({ onClose, onDone }) {
-  const [step,     setStep]     = useState('upload') // upload | preview | importing | done
-  const [rows,     setRows]     = useState([])
-  const [progress, setProgress] = useState({ done: 0, failed: 0, total: 0 })
-  const [dragOver, setDragOver] = useState(false)
+  const [step,        setStep]        = useState('upload') // upload | preview | importing | done
+  const [rows,        setRows]        = useState([])
+  const [onDuplicate, setOnDuplicate] = useState('skip')   // skip | update
+  const [result,      setResult]      = useState(null)
+  const [dragOver,    setDragOver]    = useState(false)
+  const [importing,   setImporting]   = useState(false)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -592,7 +608,10 @@ function ImportModal({ onClose, onDone }) {
     const reader = new FileReader()
     reader.onload = e => {
       const parsed = parseCSV(e.target.result)
-      if (parsed.length === 0) { alert('No recognisable client rows found. Ensure your CSV has headers like First Name, Last Name, Email, Phone.'); return }
+      if (parsed.length === 0) {
+        alert('No recognisable client rows found. Ensure your CSV has headers like First Name, Last Name, Email, Phone.')
+        return
+      }
       setRows(parsed)
       setStep('preview')
     }
@@ -600,25 +619,16 @@ function ImportModal({ onClose, onDone }) {
   }
 
   async function runImport() {
-    setStep('importing')
-    setProgress({ done: 0, failed: 0, total: rows.length })
-    let done = 0, failed = 0
-    for (const row of rows) {
-      try {
-        await api.post('/clients', {
-          first_name: row.first_name || '',
-          last_name:  row.last_name  || '',
-          email:      row.email      || '',
-          phone:      row.phone      || '',
-          gender:     row.gender     || '',
-          notes:      row.notes      || '',
-          sms_consent: false,
-        })
-        done++
-      } catch { failed++ }
-      setProgress({ done, failed, total: rows.length })
+    setImporting(true)
+    try {
+      const res = await api.post('/clients/import', { clients: rows, on_duplicate: onDuplicate })
+      setResult(res.data)
+      setStep('done')
+    } catch {
+      alert('Import failed. Please try again.')
+    } finally {
+      setImporting(false)
     }
-    setStep('done')
   }
 
   return (
@@ -635,7 +645,7 @@ function ImportModal({ onClose, onDone }) {
         {step === 'upload' && (
           <div className="p-6 space-y-5">
             <p className="text-[13.5px] text-slate-500 leading-relaxed">
-              Upload a <strong className="text-slate-700">CSV</strong> file with columns: <code className="bg-slate-100 px-1 rounded text-[12px]">First Name</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Last Name</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Email</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Phone</code>
+              Upload a <strong className="text-slate-700">CSV</strong> file. Required columns: <code className="bg-slate-100 px-1 rounded text-[12px]">First Name</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Last Name</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Phone</code>. Optional: <code className="bg-slate-100 px-1 rounded text-[12px]">Email</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Gender</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Date of Birth</code>, <code className="bg-slate-100 px-1 rounded text-[12px]">Notes</code>
             </p>
 
             {/* Drop zone */}
@@ -656,9 +666,8 @@ function ImportModal({ onClose, onDone }) {
             </div>
             <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={e => handleFile(e.target.files[0])} />
 
-            {/* Download template */}
             <button
-              onClick={() => downloadFile('First Name,Last Name,Email,Phone,Gender,Notes\nJane,Doe,jane@example.com,+1 310 000 0000,female,VIP client', 'clients-template.csv', 'text/csv')}
+              onClick={() => downloadFile(TEMPLATE_CSV, 'clients-template.csv', 'text/csv')}
               className="flex items-center gap-2 text-[13px] text-[#0D9488] hover:underline font-medium"
             >
               <FileText size={14}/> Download CSV template
@@ -674,59 +683,75 @@ function ImportModal({ onClose, onDone }) {
         {step === 'preview' && (
           <div className="p-6 space-y-4">
             <p className="text-[13.5px] text-slate-600">
-              Found <strong className="text-slate-900">{rows.length} client{rows.length !== 1 ? 's' : ''}</strong> ready to import. Preview of first 5:
+              Found <strong className="text-slate-900">{rows.length} client{rows.length !== 1 ? 's' : ''}</strong> ready to import.
             </p>
+
+            {/* Preview table */}
             <div className="border border-slate-200 rounded-xl overflow-hidden text-[12.5px]">
               <div className="grid grid-cols-4 bg-slate-50 px-4 py-2 font-semibold text-slate-500 border-b border-slate-200">
                 <span>First name</span><span>Last name</span><span>Email</span><span>Phone</span>
               </div>
-              {rows.slice(0, 5).map((r, i) => (
-                <div key={i} className={`grid grid-cols-4 px-4 py-2.5 text-slate-700 ${i < 4 ? 'border-b border-slate-100' : ''}`}>
-                  <span className="truncate">{r.first_name || <span className="text-slate-300">—</span>}</span>
-                  <span className="truncate">{r.last_name  || <span className="text-slate-300">—</span>}</span>
-                  <span className="truncate">{r.email      || <span className="text-slate-300">—</span>}</span>
-                  <span className="truncate">{r.phone      || <span className="text-slate-300">—</span>}</span>
-                </div>
-              ))}
-              {rows.length > 5 && (
-                <div className="px-4 py-2 bg-slate-50 text-slate-400 text-[12px]">+ {rows.length - 5} more…</div>
+              <div className="max-h-48 overflow-y-auto">
+                {rows.slice(0, 8).map((r, i) => (
+                  <div key={i} className={`grid grid-cols-4 px-4 py-2.5 text-slate-700 ${i < rows.slice(0,8).length - 1 ? 'border-b border-slate-100' : ''}`}>
+                    <span className="truncate pr-2">{r.first_name || <span className="text-slate-300">—</span>}</span>
+                    <span className="truncate pr-2">{r.last_name  || <span className="text-slate-300">—</span>}</span>
+                    <span className="truncate pr-2">{r.email      || <span className="text-slate-300">—</span>}</span>
+                    <span className="truncate">{r.phone      || <span className="text-slate-300">—</span>}</span>
+                  </div>
+                ))}
+              </div>
+              {rows.length > 8 && (
+                <div className="px-4 py-2 bg-slate-50 text-slate-400 text-[12px] border-t border-slate-100">+ {rows.length - 8} more…</div>
               )}
             </div>
+
+            {/* Duplicate handling */}
+            <div className="bg-slate-50 rounded-xl p-4 space-y-2">
+              <p className="text-[12.5px] font-semibold text-slate-600">If a phone or email already exists:</p>
+              <div className="flex gap-4">
+                {[['skip', 'Skip duplicate'], ['update', 'Update with new data']].map(([val, label]) => (
+                  <label key={val} className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="dup" value={val} checked={onDuplicate === val}
+                      onChange={() => setOnDuplicate(val)}
+                      className="accent-[#0D9488]" />
+                    <span className="text-[13px] text-slate-700">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-3 pt-1">
               <button onClick={() => setStep('upload')} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-[13.5px] font-semibold text-slate-600 hover:bg-slate-50">Back</button>
-              <button onClick={runImport}                className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-[13.5px] font-bold hover:bg-slate-800">
-                Import {rows.length} client{rows.length !== 1 ? 's' : ''}
+              <button
+                onClick={runImport}
+                disabled={importing}
+                className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-[13.5px] font-bold hover:bg-slate-800 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {importing ? <><Loader2 size={15} className="animate-spin" /> Importing…</> : `Import ${rows.length} client${rows.length !== 1 ? 's' : ''}`}
               </button>
             </div>
           </div>
         )}
 
-        {/* Step: importing */}
-        {step === 'importing' && (
-          <div className="p-10 flex flex-col items-center gap-5">
-            <Loader2 size={40} className="text-[#0D9488] animate-spin" />
-            <div className="text-center">
-              <p className="text-[15px] font-bold text-slate-800">Importing clients…</p>
-              <p className="text-[13px] text-slate-500 mt-1">{progress.done} of {progress.total} done</p>
-            </div>
-            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-              <div
-                className="h-2 bg-[#0D9488] rounded-full transition-all duration-300"
-                style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Step: done */}
-        {step === 'done' && (
-          <div className="p-10 flex flex-col items-center gap-4 text-center">
-            <CheckCircle2 size={48} className="text-[#0D9488]" />
+        {step === 'done' && result && (
+          <div className="p-8 flex flex-col items-center gap-5 text-center">
+            <CheckCircle2 size={52} className="text-[#0D9488]" />
             <div>
-              <p className="text-[16px] font-bold text-slate-800">Import complete!</p>
-              <p className="text-[13.5px] text-slate-500 mt-1">
-                {progress.done} imported successfully{progress.failed > 0 ? `, ${progress.failed} failed` : ''}
+              <p className="text-[16px] font-bold text-slate-800">Import complete</p>
+              <p className="text-[13.5px] text-slate-500 mt-1.5">
+                {result.created > 0 && <><strong className="text-slate-700">{result.created}</strong> new client{result.created !== 1 ? 's' : ''} added</>}
+                {result.created > 0 && (result.updated > 0 || result.skipped > 0) && ' · '}
+                {result.updated > 0 && <><strong className="text-slate-700">{result.updated}</strong> updated</>}
+                {result.updated > 0 && result.skipped > 0 && ' · '}
+                {result.skipped > 0 && <><strong className="text-slate-700">{result.skipped}</strong> skipped</>}
               </p>
+              {result.errors?.length > 0 && (
+                <p className="text-[12.5px] text-red-500 mt-2 flex items-center justify-center gap-1">
+                  <AlertCircle size={13}/> {result.errors.length} row{result.errors.length !== 1 ? 's' : ''} failed
+                </p>
+              )}
             </div>
             <button onClick={onDone} className="px-8 py-2.5 bg-slate-900 text-white rounded-xl text-[13.5px] font-bold hover:bg-slate-800">Done</button>
           </div>

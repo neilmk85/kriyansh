@@ -100,7 +100,7 @@ export default function AddStaffMember() {
       role: form.permission_role,
       accepts_online: form.allow_calendar_bookings,
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['staff'] }); navigate('/staff') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['staff'] }); navigate('/admin/staff') },
   })
 
   const canSave = form.first_name.trim() && form.email.trim()
@@ -114,7 +114,7 @@ export default function AddStaffMember() {
       <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100 shrink-0">
         <h1 className="text-[20px] font-bold text-slate-900">Add team member</h1>
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/staff')}
+          <button onClick={() => navigate('/admin/staff')}
             className="px-5 py-2 rounded-full border border-slate-300 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
             Close
           </button>
