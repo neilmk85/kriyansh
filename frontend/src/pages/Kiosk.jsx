@@ -1109,7 +1109,7 @@ function DoneStep({ checkedInName, onReset }) {
 
 // ─── Step: Appointment List ───────────────────────────────────────────────────
 
-function AppointmentListStep({ appointments, loading, onCheckin, onBack, lookup }) {
+function AppointmentListStep({ appointments, loading, onCheckin, onBack, onWalkIn, lookup }) {
   const [checkingIn, setCheckingIn] = useState(null)
 
   async function handleCheckin(appt) {
@@ -1174,13 +1174,23 @@ function AppointmentListStep({ appointments, loading, onCheckin, onBack, lookup 
             <p className="text-lg text-center max-w-sm" style={MUTED}>
               We couldn't find any upcoming appointments for this number today.
             </p>
-            <button
-              onClick={onBack}
-              className="mt-4 py-4 px-10 rounded-2xl text-white text-lg font-semibold transition-all duration-300 hover:scale-105"
-              style={{ ...PRIMARY_BTN, boxShadow: '0 0 28px rgba(13,148,136,0.4)', minHeight: 64 }}
-            >
-              Try a Different Number
-            </button>
+            <div className="flex flex-col sm:flex-row gap-4 mt-4 w-full max-w-md">
+              <button
+                onClick={onBack}
+                className="flex-1 py-4 px-6 rounded-2xl text-lg font-semibold transition-all duration-300 hover:scale-105"
+                style={{ ...GLASS_CARD, color: 'rgba(255,255,255,0.75)', minHeight: 64, border: '1.5px solid rgba(255,255,255,0.18)' }}
+              >
+                Try Different Number
+              </button>
+              <button
+                onClick={onWalkIn}
+                className="flex-1 py-4 px-6 rounded-2xl text-white text-lg font-semibold transition-all duration-300 hover:scale-105"
+                style={{ ...PRIMARY_BTN, boxShadow: '0 0 28px rgba(13,148,136,0.4)', minHeight: 64 }}
+              >
+                <UserPlus size={20} className="inline mr-2 mb-0.5" />
+                Walk In Instead
+              </button>
+            </div>
           </div>
         )}
 
@@ -1431,7 +1441,24 @@ export default function Kiosk() {
         loading={apptLoading}
         lookup={lookup}
         onCheckin={handleAppointmentCheckin}
-        onBack={() => setStep('consent')}
+        onBack={() => {
+          // returning customers skipped consent — go back to phone entry
+          setPhone('')
+          setLookup(null)
+          setStep('phone')
+        }}
+        onWalkIn={() => {
+          // switch to walk-in mode, reuse the phone + lookup already fetched
+          setMode('walkin')
+          if (lookup?.found) {
+            // returning customer — skip name/consent, go straight to services
+            fetchServices()
+            setStep('services')
+          } else {
+            // new customer — collect name then consent
+            setStep('name')
+          }
+        }}
       />
     )
   }
