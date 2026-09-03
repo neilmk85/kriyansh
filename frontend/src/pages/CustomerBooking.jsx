@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import axios from 'axios'
-import { ArrowLeft, ChevronLeft, ChevronRight, Check, Clock, X, CalendarDays, User, Sparkles, Pencil, Search, Tag, Plus } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Check, Clock, X, CalendarDays, User, Sparkles, Pencil, Search, Tag, Plus, Gift, Percent } from 'lucide-react'
 
 const UPSELL_DISCOUNT = 15 // % off add-ons added from confirm page
 
@@ -130,6 +130,8 @@ export default function CustomerBooking() {
   const [voucherApplied, setVoucherApplied] = useState(null)
   const [voucherError, setVoucherError] = useState('')
   const [recurring, setRecurring] = useState(null)
+  const [showPromoModal, setShowPromoModal] = useState(false)
+  const [promoOfferChoice, setPromoOfferChoice] = useState(null) // 'free' | 'discount' | null
 
   // ── API queries ──────────────────────────────────────────────────────
   const { data: staffRaw = [] } = useQuery({
@@ -200,8 +202,9 @@ export default function CustomerBooking() {
 
   function addUpsell(svc) {
     if (cart.find(x => x.id === svc.id)) return
-    const discounted = { ...svc, price: svc.discountedPrice, _upsell: true }
-    setCart(c => [...c, discounted])
+    const price = promoOfferChoice === 'free' ? 0 : svc.discountedPrice
+    const added = { ...svc, price, _upsell: true }
+    setCart(c => [...c, added])
     setUpsellAdded(u => [...u, svc.id])
   }
 
@@ -220,7 +223,10 @@ export default function CustomerBooking() {
     const code = voucherCode.trim().toUpperCase()
     const found = PROMO_CODES[code]
     if (!found) { setVoucherApplied(null); setVoucherError('Invalid promo code.'); return }
-    setVoucherApplied(found); setVoucherError('')
+    setVoucherApplied(found)
+    setVoucherError('')
+    setPromoOfferChoice(null)
+    setShowPromoModal(true)
   }
 
   function toggleService(svc) {
@@ -744,11 +750,15 @@ export default function CustomerBooking() {
                 <div className="px-4 pt-4 pb-3 flex items-center gap-2 border-b border-slate-50">
                   <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
                     style={{ background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}>
-                    <Tag size={13} className="text-white" />
+                    {promoOfferChoice === 'free' ? <Gift size={13} className="text-white" /> : <Tag size={13} className="text-white" />}
                   </div>
                   <div>
                     <div className="text-[13px] font-bold text-slate-800">Complete your session</div>
-                    <div className="text-[11px] text-slate-400">{UPSELL_DISCOUNT}% off when added now</div>
+                    <div className="text-[11px] text-slate-400">
+                      {promoOfferChoice === 'free'
+                        ? '🎁 Add for free with your promo code'
+                        : `${UPSELL_DISCOUNT}% off when added now`}
+                    </div>
                   </div>
                 </div>
                 <div className="divide-y divide-slate-50">
@@ -763,9 +773,13 @@ export default function CustomerBooking() {
                               <Clock size={9} /> {svc.duration_min ?? svc.duration} min
                             </span>
                             <span className="text-[11px] text-slate-400 line-through">${svc.originalPrice}</span>
-                            <span className="text-[12px] font-bold text-[#0D9488]">${svc.discountedPrice}</span>
+                            {promoOfferChoice === 'free' ? (
+                              <span className="text-[12px] font-bold text-emerald-600">Free</span>
+                            ) : (
+                              <span className="text-[12px] font-bold text-[#0D9488]">${svc.discountedPrice}</span>
+                            )}
                             <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
-                              -{UPSELL_DISCOUNT}%
+                              {promoOfferChoice === 'free' ? '100% off' : `-${UPSELL_DISCOUNT}%`}
                             </span>
                           </div>
                         </div>
@@ -827,6 +841,96 @@ export default function CustomerBooking() {
           </div>
         )}
       </div>
+
+      {/* ── Promo offer modal ──────────────────────────── */}
+      {showPromoModal && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+            style={{ animation: 'slide-up 0.28s cubic-bezier(0.34,1.56,0.64,1)' }}>
+
+            {/* Header */}
+            <div className="relative px-5 pt-6 pb-4 text-center"
+              style={{ background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}>
+              <button onClick={() => setShowPromoModal(false)}
+                className="absolute top-4 right-4 w-7 h-7 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors">
+                <X size={14} className="text-white" />
+              </button>
+              <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-3">
+                <Sparkles size={28} className="text-white" />
+              </div>
+              <h3 className="text-[18px] font-black text-white leading-tight">
+                Promo code unlocked! 🎉
+              </h3>
+              <p className="text-[13px] text-white/80 mt-1">Choose how you'd like to use it</p>
+            </div>
+
+            {/* Options */}
+            <div className="p-4 space-y-3">
+              {/* Option A — free service */}
+              <button
+                onClick={() => { setPromoOfferChoice('free'); setShowPromoModal(false) }}
+                className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${
+                  promoOfferChoice === 'free'
+                    ? 'border-[#0D9488] bg-teal-50'
+                    : 'border-slate-200 hover:border-[#0D9488]/50 hover:bg-slate-50'
+                }`}>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #0D9488, #06B6D4)' }}>
+                  <Gift size={20} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-bold text-slate-800">Avail extra services at no cost</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5 leading-snug">
+                    Add recommended services to your booking — completely free
+                  </div>
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                  promoOfferChoice === 'free' ? 'border-[#0D9488] bg-[#0D9488]' : 'border-slate-300'}`}>
+                  {promoOfferChoice === 'free' && <Check size={10} className="text-white" strokeWidth={3} />}
+                </div>
+              </button>
+
+              {/* Option B — discount on add-ons */}
+              <button
+                onClick={() => { setPromoOfferChoice('discount'); setShowPromoModal(false) }}
+                className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${
+                  promoOfferChoice === 'discount'
+                    ? 'border-[#6366F1] bg-indigo-50'
+                    : 'border-slate-200 hover:border-[#6366F1]/50 hover:bg-slate-50'
+                }`}>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' }}>
+                  <Percent size={20} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-bold text-slate-800">Get discount on added services</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5 leading-snug">
+                    {UPSELL_DISCOUNT}% off when you add complementary services now
+                  </div>
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                  promoOfferChoice === 'discount' ? 'border-[#6366F1] bg-[#6366F1]' : 'border-slate-300'}`}>
+                  {promoOfferChoice === 'discount' && <Check size={10} className="text-white" strokeWidth={3} />}
+                </div>
+              </button>
+            </div>
+
+            <div className="px-4 pb-5">
+              <p className="text-[11px] text-center text-slate-400">
+                Tap an option above to apply it to your booking
+              </p>
+            </div>
+          </div>
+
+          <style>{`
+            @keyframes slide-up {
+              from { opacity: 0; transform: translateY(24px) scale(0.97); }
+              to   { opacity: 1; transform: translateY(0)    scale(1);    }
+            }
+          `}</style>
+        </div>
+      )}
 
       {/* ── Sticky bottom CTA ──────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 p-4 shadow-xl">
