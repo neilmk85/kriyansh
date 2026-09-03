@@ -2,7 +2,57 @@ import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import axios from 'axios'
-import { ArrowLeft, ChevronLeft, ChevronRight, Check, Clock, X, CalendarDays, User, Sparkles, Pencil, Search } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Check, Clock, X, CalendarDays, User, Sparkles, Pencil, Search, Tag, Plus } from 'lucide-react'
+
+const UPSELL_DISCOUNT = 15 // % off add-ons added from confirm page
+
+// Category affinity map — keys are substrings to match against category names
+const CATEGORY_AFFINITY = {
+  facial:    ['hair', 'nails', 'wax', 'brow', 'lash'],
+  hair:      ['colour', 'color', 'treatment', 'nails', 'blow'],
+  colour:    ['hair', 'treatment', 'gloss', 'toner'],
+  color:     ['hair', 'treatment', 'gloss', 'toner'],
+  nails:     ['facial', 'wax', 'massage'],
+  wax:       ['facial', 'nails', 'brow'],
+  massage:   ['facial', 'nails', 'body'],
+  brow:      ['facial', 'lash', 'wax'],
+  lash:      ['brow', 'facial'],
+}
+
+function getUpsells(cart, allServices) {
+  if (cart.length === 0) return []
+  const cartIds = new Set(cart.map(s => s.id))
+  const cartCats = cart.map(s => (s.category_name || '').toLowerCase())
+
+  // Find complementary category keywords
+  const wantedKeywords = new Set()
+  for (const cc of cartCats) {
+    for (const [key, affinities] of Object.entries(CATEGORY_AFFINITY)) {
+      if (cc.includes(key)) affinities.forEach(a => wantedKeywords.add(a))
+    }
+  }
+
+  // Score services: not in cart, complementary, has price
+  const scored = allServices
+    .filter(s => !cartIds.has(s.id) && s.price > 0)
+    .map(s => {
+      const cat = (s.category_name || '').toLowerCase()
+      // Don't suggest from same categories already in cart
+      const sameCategory = cartCats.some(cc => cc === cat)
+      if (sameCategory) return null
+      const score = [...wantedKeywords].some(kw => cat.includes(kw)) ? 2 : 1
+      return { ...s, score }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || b.price - a.price)
+    .slice(0, 3)
+
+  return scored.map(s => ({
+    ...s,
+    originalPrice: s.price,
+    discountedPrice: Math.round(s.price * (1 - UPSELL_DISCOUNT / 100)),
+  }))
+}
 
 const PROMO_CODES = {
   FIRST10:  { type: 'percent', val: 10 },
@@ -142,6 +192,18 @@ export default function CustomerBooking() {
     const member = staffList.find(s => s.id === effectiveStaffId)
     return member?.name || 'Any Available'
   })()
+
+  const upsells = useMemo(() => getUpsells(cart, services), [cart, services])
+
+  // upsell cart items (added from confirm page, carry their discounted price)
+  const [upsellAdded, setUpsellAdded] = useState([])
+
+  function addUpsell(svc) {
+    if (cart.find(x => x.id === svc.id)) return
+    const discounted = { ...svc, price: svc.discountedPrice, _upsell: true }
+    setCart(c => [...c, discounted])
+    setUpsellAdded(u => [...u, svc.id])
+  }
 
   const dateLabel = selectedDay
     ? new Date(viewYear, viewMonth, selectedDay).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -508,17 +570,26 @@ export default function CustomerBooking() {
                 <div className="grid grid-cols-3 gap-2">
                   {slots.map(slot => {
                     const sel = selectedSlot === slot.time
+                    const staffNames = slot.staff || []
+                    const count = slot.available_count ?? (slot.available ? 1 : 0)
                     return (
                       <button key={slot.time} disabled={!slot.available}
                         onClick={() => setSelectedSlot(slot.time)}
-                        className={`py-2.5 rounded-xl text-[13px] font-semibold transition-all border-2
+                        className={`py-2 px-1 rounded-xl text-[13px] font-semibold transition-all border-2 flex flex-col items-center gap-0.5
                           ${!slot.available
-                            ? 'border-slate-100 text-slate-300 cursor-not-allowed bg-slate-50 line-through'
+                            ? 'border-slate-100 text-slate-300 cursor-not-allowed bg-slate-50'
                             : sel
                               ? 'text-white border-transparent shadow-md'
                               : 'border-slate-200 text-slate-700 hover:border-[#0D9488] hover:text-[#0D9488]'}`}
                         style={sel ? { background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' } : {}}>
-                        {to12h(slot.time)}
+                        <span>{to12h(slot.time)}</span>
+                        {slot.available && count > 0 && (
+                          <span className={`text-[10px] font-medium leading-tight ${sel ? 'text-white/80' : 'text-slate-400'}`}>
+                            {count === 1 && staffNames.length === 1
+                              ? staffNames[0].name.split(' ')[0]
+                              : `${count} stylists`}
+                          </span>
+                        )}
                       </button>
                     )
                   })}
@@ -528,6 +599,28 @@ export default function CustomerBooking() {
                     </div>
                   )}
                 </div>
+
+                {/* Staff detail for selected slot */}
+                {selectedSlot && (() => {
+                  const sel = slots.find(s => s.time === selectedSlot)
+                  const names = sel?.staff || []
+                  if (names.length <= 1) return null
+                  return (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2">
+                        Available at {to12h(selectedSlot)}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {names.map(s => (
+                          <span key={s.id}
+                            className="flex items-center gap-1 text-[11px] font-semibold bg-teal-50 text-teal-700 border border-teal-100 px-2.5 py-1 rounded-full">
+                            <User size={9} /> {s.name.split(' ')[0]}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
             )}
           </div>
@@ -644,6 +737,56 @@ export default function CustomerBooking() {
                 })}
               </div>
             </div>
+
+            {/* ── Upsell: Add-on recommendations ───────────────────── */}
+            {upsells.length > 0 && (
+              <div className="bg-white rounded-2xl border-2 border-[#0D9488]/20 shadow-sm overflow-hidden">
+                <div className="px-4 pt-4 pb-3 flex items-center gap-2 border-b border-slate-50">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #0D9488 0%, #6366F1 100%)' }}>
+                    <Tag size={13} className="text-white" />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-bold text-slate-800">Complete your session</div>
+                    <div className="text-[11px] text-slate-400">{UPSELL_DISCOUNT}% off when added now</div>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-50">
+                  {upsells.map(svc => {
+                    const added = cart.find(x => x.id === svc.id)
+                    return (
+                      <div key={svc.id} className="flex items-center gap-3 px-4 py-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-slate-800">{svc.name}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="flex items-center gap-0.5 text-[11px] text-slate-400">
+                              <Clock size={9} /> {svc.duration_min ?? svc.duration} min
+                            </span>
+                            <span className="text-[11px] text-slate-400 line-through">${svc.originalPrice}</span>
+                            <span className="text-[12px] font-bold text-[#0D9488]">${svc.discountedPrice}</span>
+                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                              -{UPSELL_DISCOUNT}%
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => addUpsell(svc)}
+                          disabled={!!added}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-2 transition-all ${
+                            added
+                              ? 'border-[#0D9488] bg-[#0D9488]'
+                              : 'border-slate-300 hover:border-[#0D9488] hover:text-[#0D9488]'
+                          }`}>
+                          {added
+                            ? <Check size={13} className="text-white" strokeWidth={3} />
+                            : <Plus size={13} className="text-slate-500" />}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5">
               <div className="text-[12px] font-bold text-slate-600 mb-0.5">Cancellation policy</div>

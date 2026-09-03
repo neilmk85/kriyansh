@@ -12,6 +12,8 @@ import (
 )
 
 // GET /api/public/slots?staff_id=X&date=YYYY-MM-DD
+// Returns available time slots with per-slot staff availability.
+// staff_id=0 or omitted → check all staff and return who is free at each slot.
 func (a *App) PublicListSlots(w http.ResponseWriter, r *http.Request) {
 	staffIDStr := r.URL.Query().Get("staff_id")
 	dateStr := r.URL.Query().Get("date")
@@ -25,8 +27,29 @@ func (a *App) PublicListSlots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bookedSet := make(map[string]bool)
-	if staffIDStr != "" && staffIDStr != "0" {
+	type SlotStaff struct {
+		ID   uint   `json:"id"`
+		Name string `json:"name"`
+	}
+	type Slot struct {
+		Time           string      `json:"time"`
+		Available      bool        `json:"available"`
+		AvailableCount int         `json:"available_count"`
+		Staff          []SlotStaff `json:"staff"`
+	}
+
+	now := time.Now()
+	isToday := d.Format("2006-01-02") == now.Format("2006-01-02")
+
+	// Determine the salon
+	var salonID uint
+	a.DB.QueryRowContext(r.Context(), `SELECT id FROM salons ORDER BY id LIMIT 1`).Scan(&salonID)
+
+	specificStaff := staffIDStr != "" && staffIDStr != "0"
+
+	if specificStaff {
+		// Single staff — original behaviour but now includes staff info
+		bookedSet := make(map[string]bool)
 		rows, err := a.DB.QueryContext(r.Context(),
 			`SELECT DATE_FORMAT(start_at, '%H:%i') FROM appointments
 			 WHERE staff_id=? AND DATE(start_at)=? AND status NOT IN ('cancelled','no_show')`,
@@ -39,28 +62,106 @@ func (a *App) PublicListSlots(w http.ResponseWriter, r *http.Request) {
 				bookedSet[t] = true
 			}
 		}
+		// Get the staff member's name
+		var staffName string
+		var staffID uint
+		a.DB.QueryRowContext(r.Context(),
+			`SELECT sp.id, CONCAT(u.first_name,' ',u.last_name) FROM staff_profiles sp
+			 JOIN users u ON u.id=sp.user_id WHERE sp.id=?`, staffIDStr).
+			Scan(&staffID, &staffName)
+
+		var slots []Slot
+		for h := 9; h < 19; h++ {
+			for _, m := range []int{0, 30} {
+				tStr := fmt.Sprintf("%02d:%02d", h, m)
+				avail := !bookedSet[tStr]
+				if isToday && avail {
+					slotMinutes := h*60 + m
+					nowMinutes := now.Hour()*60 + now.Minute() + 30
+					if slotMinutes <= nowMinutes {
+						avail = false
+					}
+				}
+				cnt := 0
+				var staff []SlotStaff
+				if avail && staffID > 0 {
+					cnt = 1
+					staff = []SlotStaff{{ID: staffID, Name: staffName}}
+				}
+				if staff == nil {
+					staff = []SlotStaff{}
+				}
+				slots = append(slots, Slot{Time: tStr, Available: avail, AvailableCount: cnt, Staff: staff})
+			}
+		}
+		a.JSON(w, http.StatusOK, slots)
+		return
 	}
 
-	now := time.Now().UTC()
-	isToday := d.Format("2006-01-02") == now.Format("2006-01-02")
-
-	type Slot struct {
-		Time      string `json:"time"`
-		Available bool   `json:"available"`
+	// Any available — fetch all staff and compute per-slot availability
+	staffRows, err := a.DB.QueryContext(r.Context(),
+		`SELECT sp.id, CONCAT(u.first_name,' ',u.last_name)
+		 FROM staff_profiles sp JOIN users u ON u.id=sp.user_id
+		 WHERE sp.salon_id=? AND sp.accepts_online=1 AND u.is_active=1
+		 ORDER BY u.first_name`, salonID)
+	var allStaff []SlotStaff
+	if err == nil {
+		defer staffRows.Close()
+		for staffRows.Next() {
+			var s SlotStaff
+			staffRows.Scan(&s.ID, &s.Name)
+			allStaff = append(allStaff, s)
+		}
 	}
+
+	// bookedByStaff: staffID -> set of booked times
+	bookedByStaff := make(map[uint]map[string]bool)
+	for _, s := range allStaff {
+		bookedByStaff[s.ID] = make(map[string]bool)
+	}
+	if len(allStaff) > 0 {
+		apptRows, err := a.DB.QueryContext(r.Context(),
+			`SELECT staff_id, DATE_FORMAT(start_at, '%H:%i') FROM appointments
+			 WHERE salon_id=? AND DATE(start_at)=? AND status NOT IN ('cancelled','no_show')`,
+			salonID, dateStr)
+		if err == nil {
+			defer apptRows.Close()
+			for apptRows.Next() {
+				var sid uint
+				var t string
+				apptRows.Scan(&sid, &t)
+				if _, ok := bookedByStaff[sid]; ok {
+					bookedByStaff[sid][t] = true
+				}
+			}
+		}
+	}
+
 	var slots []Slot
 	for h := 9; h < 19; h++ {
 		for _, m := range []int{0, 30} {
 			tStr := fmt.Sprintf("%02d:%02d", h, m)
-			avail := !bookedSet[tStr]
-			if isToday && avail {
+			isPast := false
+			if isToday {
 				slotMinutes := h*60 + m
 				nowMinutes := now.Hour()*60 + now.Minute() + 30
-				if slotMinutes <= nowMinutes {
-					avail = false
+				isPast = slotMinutes <= nowMinutes
+			}
+			var freeStaff []SlotStaff
+			for _, s := range allStaff {
+				if !bookedByStaff[s.ID][tStr] && !isPast {
+					freeStaff = append(freeStaff, s)
 				}
 			}
-			slots = append(slots, Slot{Time: tStr, Available: avail})
+			if freeStaff == nil {
+				freeStaff = []SlotStaff{}
+			}
+			slots = append(slots, Slot{
+				Time:           tStr,
+				Available:      len(freeStaff) > 0,
+				AvailableCount: len(freeStaff),
+				Staff:          freeStaff,
+			})
 		}
 	}
 	a.JSON(w, http.StatusOK, slots)
