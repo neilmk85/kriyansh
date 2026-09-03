@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -112,6 +113,14 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 
 		// Schedule post-visit review request
 		go a.ScheduleReviewRequest(r.Context(), claims.SalonID, *req.ClientID, txnID)
+	}
+
+	// Loyalty star milestone check (fires even without grand_total, e.g. comp visits)
+	if req.ClientID != nil {
+		cID := *req.ClientID
+		tID := uint(txnID)
+		sID := claims.SalonID
+		go a.CheckLoyaltyMilestone(context.Background(), sID, cID, tID)
 	}
 
 	a.JSON(w, http.StatusCreated, resp)

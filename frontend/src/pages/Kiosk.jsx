@@ -1328,9 +1328,9 @@ export default function Kiosk() {
         if (data.found) {
           setName({ first: data.first_name || '', last: data.last_name || '' })
           setSmsConsent(data.sms_consent !== false)
-          // Returning customer — skip consent, go straight to services
+          // Returning customer — show welcome-back screen, then skip consent
           fetchServices()
-          setStep('services')
+          setStep('name')
         } else {
           setStep('name')
         }
@@ -1510,7 +1510,14 @@ export default function Kiosk() {
         lookup={lookup}
         name={name}
         setName={setName}
-        onNext={() => setStep('consent')}
+        onNext={() => {
+          if (lookup?.found) {
+            // returning customer — consent already on file, skip straight to services
+            setStep('services')
+          } else {
+            setStep('consent')
+          }
+        }}
         onBack={() => setStep('phone')}
       />
     )
@@ -1524,7 +1531,14 @@ export default function Kiosk() {
         setSelectedIds={setSelectedServiceIds}
         onNext={() => { fetchStaff(); setStep('staff') }}
         onSkip={() => { setSelectedServiceIds([]); fetchStaff(); setStep('staff') }}
-        onBack={() => setStep('consent')}
+        onBack={() => {
+          // returning walk-in customers came from name step (skipped consent)
+          if (mode === 'walkin' && lookup?.found) {
+            setStep('name')
+          } else {
+            setStep('consent')
+          }
+        }}
       />
     )
   }
