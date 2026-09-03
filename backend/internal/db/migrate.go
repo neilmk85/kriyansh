@@ -511,6 +511,9 @@ func Migrate(db *sql.DB) error {
 		// Deposit capture
 		{"appointments",     "payment_intent_id",          "VARCHAR(255) DEFAULT ''"},
 		{"appointments",     "deposit_charged",            "TINYINT DEFAULT 0"},
+		// Recurring bookings
+		{"appointments",     "recurring_frequency",        "VARCHAR(20) DEFAULT NULL COMMENT 'Weekly,Every 2 Weeks,Monthly'"},
+		{"appointments",     "recurring_confirmed",        "TINYINT DEFAULT 0 COMMENT '1 = next booking already confirmed at kiosk'"},
 	}
 	for _, m := range colMigrations {
 		if err := addColumnIfNotExists(db, m.table, m.column, m.def); err != nil {

@@ -258,16 +258,17 @@ func (a *App) PublicCreatePaymentIntent(w http.ResponseWriter, r *http.Request) 
 // POST /api/public/appointments — create appointment from customer booking flow
 func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		FirstName       string  `json:"first_name"`
-		LastName        string  `json:"last_name"`
-		Email           string  `json:"email"`
-		Phone           string  `json:"phone"`
-		ServiceIDs      []int   `json:"service_ids"`
-		StaffID         int     `json:"staff_id"`
-		StartAt         string  `json:"start_at"` // RFC3339
-		Notes           string  `json:"notes"`
-		PaymentIntentID string  `json:"payment_intent_id"`
-		DepositPaid     float64 `json:"deposit_paid"`
+		FirstName          string  `json:"first_name"`
+		LastName           string  `json:"last_name"`
+		Email              string  `json:"email"`
+		Phone              string  `json:"phone"`
+		ServiceIDs         []int   `json:"service_ids"`
+		StaffID            int     `json:"staff_id"`
+		StartAt            string  `json:"start_at"` // RFC3339
+		Notes              string  `json:"notes"`
+		PaymentIntentID    string  `json:"payment_intent_id"`
+		DepositPaid        float64 `json:"deposit_paid"`
+		RecurringFrequency string  `json:"recurring_frequency"` // "Weekly","Every 2 Weeks","Monthly"
 	}
 	if err := a.Decode(r, &req); err != nil {
 		a.Error(w, http.StatusBadRequest, "invalid body")
@@ -368,10 +369,14 @@ func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 	if a.StripeKey != "" && req.PaymentIntentID != "" {
 		piID = req.PaymentIntentID
 	}
+	var recurringFreq *string
+	if req.RecurringFrequency != "" && req.RecurringFrequency != "One-time" {
+		recurringFreq = &req.RecurringFrequency
+	}
 	res, err := a.DB.ExecContext(r.Context(),
-		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, status, notes, deposit_paid, source, payment_intent_id)
-		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, 'online', ?)`,
-		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid, piID)
+		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, status, notes, deposit_paid, source, payment_intent_id, recurring_frequency)
+		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, 'online', ?, ?)`,
+		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid, piID, recurringFreq)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

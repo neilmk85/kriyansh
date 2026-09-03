@@ -15,8 +15,8 @@ class ApiService {
 
   // Use 10.0.2.2 for Android emulator; localhost for iOS sim / web
   static String get baseUrl {
-    if (Platform.isAndroid) return 'http://10.0.2.2:8080';
-    return 'http://localhost:8080';
+    if (Platform.isAndroid) return 'http://10.0.2.2:8081';
+    return 'http://localhost:8081';
   }
 
   static String? _token;

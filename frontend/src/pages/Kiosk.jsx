@@ -10,6 +10,8 @@ import {
   Search,
   Calendar,
   UserPlus,
+  RefreshCw,
+  Bell,
 } from 'lucide-react'
 
 const DARK_BG = {
@@ -121,39 +123,56 @@ function WelcomeStep({ onNext }) { // onNext(mode: 'walkin'|'appointment')
           Welcome — how can we help you today?
         </p>
 
-        {/* Two paths */}
-        <div className="flex flex-col sm:flex-row gap-5 w-full max-w-xl">
+        {/* Three paths */}
+        <div className="flex flex-col sm:flex-row gap-4 w-full max-w-2xl">
           <button
             onClick={() => onNext('appointment')}
-            className="flex-1 flex flex-col items-center gap-4 py-8 px-8 rounded-2xl text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
+            className="flex-1 flex flex-col items-center gap-3 py-7 px-6 rounded-2xl text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
             style={{
               background: 'linear-gradient(135deg, rgba(8,145,178,0.35) 0%, rgba(124,58,237,0.35) 100%)',
               border: '1.5px solid rgba(8,145,178,0.45)',
               boxShadow: '0 0 36px rgba(8,145,178,0.22)',
-              minHeight: 160,
+              minHeight: 150,
             }}
           >
-            <Calendar size={36} style={{ color: '#67E8F9' }} />
+            <Calendar size={32} style={{ color: '#67E8F9' }} />
             <div className="text-center">
-              <p className="text-xl font-bold">I Have an Appointment</p>
-              <p className="text-sm mt-1" style={MUTED}>Check in for a booked service</p>
+              <p className="text-lg font-bold">I Have an Appointment</p>
+              <p className="text-xs mt-1" style={MUTED}>Check in for a booked service</p>
             </div>
           </button>
 
           <button
             onClick={() => onNext('walkin')}
-            className="flex-1 flex flex-col items-center gap-4 py-8 px-8 rounded-2xl text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
+            className="flex-1 flex flex-col items-center gap-3 py-7 px-6 rounded-2xl text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
             style={{
               ...PRIMARY_BTN,
               boxShadow: '0 0 36px rgba(13,148,136,0.4)',
               animation: 'pulse-glow 2.5s ease-in-out infinite',
-              minHeight: 160,
+              minHeight: 150,
             }}
           >
-            <UserPlus size={36} color="white" />
+            <UserPlus size={32} color="white" />
             <div className="text-center">
-              <p className="text-xl font-bold">Walk-in</p>
-              <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>Join the queue without a booking</p>
+              <p className="text-lg font-bold">Walk-in</p>
+              <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>Join the queue without a booking</p>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onNext('checkout')}
+            className="flex-1 flex flex-col items-center gap-3 py-7 px-6 rounded-2xl text-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97]"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.3) 0%, rgba(234,88,12,0.3) 100%)',
+              border: '1.5px solid rgba(245,158,11,0.45)',
+              boxShadow: '0 0 36px rgba(245,158,11,0.2)',
+              minHeight: 150,
+            }}
+          >
+            <RefreshCw size={32} style={{ color: '#FCD34D' }} />
+            <div className="text-center">
+              <p className="text-lg font-bold">Check Out</p>
+              <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.6)' }}>Confirm your next appointment</p>
             </div>
           </button>
         </div>
@@ -1242,6 +1261,297 @@ function AppointmentListStep({ appointments, loading, onCheckin, onBack, onWalkI
   )
 }
 
+// ─── Step: Recurring Next Appointment ────────────────────────────────────────
+
+function RecurringNextStep({ appt, onConfirm, onSkip, onBack, loading }) {
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    })
+  }
+  function fmtTime(iso) {
+    return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  }
+
+  const freqLabel = appt?.recurring_frequency || 'Recurring'
+
+  return (
+    <div className="min-h-screen flex flex-col" style={DARK_BG}>
+      <div
+        className="absolute top-[-60px] right-20 w-64 h-64 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.18) 0%, transparent 70%)' }}
+      />
+      <div
+        className="absolute bottom-[-60px] left-[-40px] w-72 h-72 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(13,148,136,0.15) 0%, transparent 70%)' }}
+      />
+
+      <div className="flex items-center px-8 pt-8 pb-4">
+        <button
+          onClick={onBack}
+          className="flex items-center justify-center w-14 h-14 rounded-2xl transition-all duration-300 hover:scale-105 active:scale-95"
+          style={GLASS_CARD}
+        >
+          <ChevronLeft size={28} color="white" />
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center px-8 pb-12 max-w-2xl mx-auto w-full">
+        {/* Today's completed visit */}
+        <div className="w-full mb-8 mt-2">
+          <div
+            className="w-full rounded-2xl px-6 py-5 flex items-center gap-5"
+            style={{
+              background: 'rgba(16,185,129,0.12)',
+              border: '1px solid rgba(16,185,129,0.3)',
+            }}
+          >
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #059669, #10B981)' }}
+            >
+              <Check size={22} color="white" strokeWidth={3} />
+            </div>
+            <div>
+              <p className="text-white font-bold text-xl">Today's visit complete</p>
+              <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                {appt?.service_name}{appt?.staff_name ? ` · with ${appt.staff_name}` : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Next appointment card */}
+        <div className="text-center mb-8">
+          <div
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full mb-5"
+            style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}
+          >
+            <RefreshCw size={15} style={{ color: '#FCD34D' }} />
+            <span className="text-sm font-semibold" style={{ color: '#FCD34D' }}>{freqLabel} booking</span>
+          </div>
+          <h2 className="text-4xl font-bold text-white mb-2">Book your next visit?</h2>
+          <p className="text-xl" style={MUTED}>We've picked the perfect time for you</p>
+        </div>
+
+        {/* Next appointment detail card */}
+        <div
+          className="w-full rounded-2xl overflow-hidden mb-8"
+          style={{
+            ...GLASS_CARD,
+            border: '1.5px solid rgba(245,158,11,0.35)',
+            boxShadow: '0 0 30px rgba(245,158,11,0.15)',
+          }}
+        >
+          <div
+            className="px-6 py-3 flex items-center gap-2"
+            style={{ background: 'rgba(245,158,11,0.12)', borderBottom: '1px solid rgba(245,158,11,0.2)' }}
+          >
+            <Calendar size={15} style={{ color: '#FCD34D' }} />
+            <span className="text-sm font-bold" style={{ color: '#FCD34D' }}>Next Appointment</span>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex items-center gap-4">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(245,158,11,0.2)' }}
+              >
+                <Calendar size={18} style={{ color: '#FCD34D' }} />
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Date</p>
+                <p className="text-white text-lg font-bold">{fmtDate(appt?.next_date)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(245,158,11,0.2)' }}
+              >
+                <Clock size={18} style={{ color: '#FCD34D' }} />
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Time</p>
+                <p className="text-white text-lg font-bold">{fmtTime(appt?.next_date)}</p>
+              </div>
+            </div>
+            {appt?.service_name && (
+              <div className="flex items-center gap-4">
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(245,158,11,0.2)' }}
+                >
+                  <Sparkles size={18} style={{ color: '#FCD34D' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Service</p>
+                  <p className="text-white text-lg font-bold">{appt.service_name}</p>
+                </div>
+              </div>
+            )}
+            {appt?.staff_name && (
+              <div className="flex items-center gap-4">
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(245,158,11,0.2)' }}
+                >
+                  <User size={18} style={{ color: '#FCD34D' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Stylist</p>
+                  <p className="text-white text-lg font-bold">{appt.staff_name}</p>
+                </div>
+              </div>
+            )}
+          </div>
+          <div
+            className="px-6 py-3 flex items-center gap-2"
+            style={{ background: 'rgba(13,148,136,0.1)', borderTop: '1px solid rgba(13,148,136,0.2)' }}
+          >
+            <Bell size={13} style={{ color: '#5EEAD4' }} />
+            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              You'll receive a text confirmation with deposit details
+            </span>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="w-full flex gap-4">
+          <button
+            onClick={onSkip}
+            disabled={loading}
+            className="flex-1 py-5 rounded-2xl text-xl font-semibold transition-all duration-300 hover:scale-[1.01] active:scale-[0.99]"
+            style={{ ...GLASS_CARD, color: 'rgba(255,255,255,0.6)', minHeight: 72 }}
+          >
+            Not now
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="flex-[2] py-5 rounded-2xl text-white text-xl font-bold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+            style={{
+              background: 'linear-gradient(135deg, #D97706, #F59E0B)',
+              boxShadow: loading ? 'none' : '0 0 32px rgba(245,158,11,0.5)',
+              opacity: loading ? 0.6 : 1,
+              minHeight: 72,
+            }}
+          >
+            {loading ? 'Confirming…' : <>Confirm Next Appointment <ArrowRight size={22} /></>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Step: Recurring Done (after booking next appointment) ────────────────────
+
+function RecurringDoneStep({ appt, onReset }) {
+  const [countdown, setCountdown] = useState(12)
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { clearInterval(t); onReset(); return 0 }
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(t)
+  }, [onReset])
+
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    })
+  }
+  function fmtTime(iso) {
+    return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col" style={DARK_BG}>
+      {/* Customer-facing confirmation */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-8">
+        <div className="relative flex items-center justify-center mb-10">
+          <div
+            className="absolute w-52 h-52 rounded-full"
+            style={{ background: 'rgba(245,158,11,0.1)', animation: 'ring-pulse 2s ease-out infinite' }}
+          />
+          <div
+            className="absolute w-40 h-40 rounded-full"
+            style={{ background: 'rgba(245,158,11,0.15)', animation: 'ring-pulse 2s ease-out 0.4s infinite' }}
+          />
+          <div
+            className="w-28 h-28 rounded-full flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #D97706, #F59E0B)', boxShadow: '0 0 60px rgba(245,158,11,0.5)' }}
+          >
+            <Check size={52} color="white" strokeWidth={3} />
+          </div>
+        </div>
+
+        <h2
+          className="text-5xl font-bold text-white mb-3 text-center px-8"
+          style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
+        >
+          See you {fmtDate(appt?.next_start)}!
+        </h2>
+        <p className="text-2xl text-center mb-3" style={MUTED}>
+          {fmtTime(appt?.next_start)} · {appt?.frequency}
+        </p>
+        <p className="text-lg text-center mb-8" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          A confirmation text has been sent to your phone.
+        </p>
+
+        {/* Staff notice */}
+        <div
+          className="w-full max-w-lg rounded-2xl px-6 py-5 mb-6 flex items-start gap-4"
+          style={{
+            background: 'rgba(99,102,241,0.15)',
+            border: '1.5px solid rgba(99,102,241,0.35)',
+            boxShadow: '0 0 24px rgba(99,102,241,0.15)',
+          }}
+        >
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+            style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' }}
+          >
+            <Bell size={18} color="white" />
+          </div>
+          <div>
+            <p className="text-white font-bold text-base mb-1">Staff notice</p>
+            <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              New recurring appointment added to the calendar for{' '}
+              <span className="text-white font-semibold">{appt?.client_name || 'this client'}</span>
+              {' '}on <span className="text-white font-semibold">{fmtDate(appt?.next_start)}</span> at{' '}
+              <span className="text-white font-semibold">{fmtTime(appt?.next_start)}</span>.{' '}
+              Please confirm deposit with client.
+            </p>
+          </div>
+        </div>
+
+        <p className="text-base" style={MUTED}>
+          Returning to home in {countdown}…
+        </p>
+
+        <button
+          onClick={onReset}
+          className="mt-4 px-10 py-3 rounded-2xl text-base transition-all duration-300 hover:scale-105"
+          style={{ ...GLASS_CARD, color: 'rgba(255,255,255,0.5)' }}
+        >
+          Done
+        </button>
+      </div>
+
+      <style>{`
+        @keyframes ring-pulse {
+          0%   { transform: scale(0.85); opacity: 0.7; }
+          100% { transform: scale(1.4);  opacity: 0;   }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 // ─── Root Component ───────────────────────────────────────────────────────────
 
 export default function Kiosk() {
@@ -1261,6 +1571,12 @@ export default function Kiosk() {
   const [apptLoading, setApptLoading] = useState(false)
   const [smsConsent, setSmsConsent] = useState(true)
   const [familyMembers, setFamilyMembers] = useState([])
+
+  // ── Checkout / recurring flow state ──
+  const [checkoutAppt, setCheckoutAppt] = useState(null)   // from /api/public/appointments/current
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [bookingNext, setBookingNext] = useState(false)
+  const [nextBooked, setNextBooked] = useState(null)        // response from /book-next
 
   // Fetch services
   const fetchServices = useCallback(async () => {
@@ -1289,6 +1605,56 @@ export default function Kiosk() {
     fetchServices()
     fetchStaff()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Checkout mode — look up today's completed recurring appointment
+  const handleCheckoutPhoneNext = async () => {
+    setCheckoutLoading(true)
+    try {
+      const res = await fetch(`/api/public/appointments/current?phone=${phone}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data) {
+          setCheckoutAppt(data)
+          setStep('checkout-next')
+        } else {
+          // No recurring appointment found — show not-found state
+          setCheckoutAppt(null)
+          setStep('checkout-next')
+        }
+      } else {
+        setCheckoutAppt(null)
+        setStep('checkout-next')
+      }
+    } catch {
+      setCheckoutAppt(null)
+      setStep('checkout-next')
+    } finally {
+      setCheckoutLoading(false)
+    }
+  }
+
+  // Book the next recurring appointment
+  const handleBookNext = async () => {
+    if (!checkoutAppt) return
+    setBookingNext(true)
+    try {
+      const res = await fetch(`/api/public/appointments/${checkoutAppt.id}/book-next`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        setNextBooked({
+          ...data,
+          client_name: checkoutAppt.client_name,
+        })
+        setStep('checkout-done')
+      } else {
+        alert('Could not confirm booking. Please see the front desk.')
+      }
+    } catch {
+      alert('Unable to connect. Please see the front desk.')
+    } finally {
+      setBookingNext(false)
+    }
+  }
 
   // Phone next — branches on mode
   const handlePhoneNext = async () => {
@@ -1426,13 +1792,87 @@ export default function Kiosk() {
     setApptLoading(false)
     setSmsConsent(true)
     setFamilyMembers([])
+    setCheckoutAppt(null)
+    setBookingNext(false)
+    setNextBooked(null)
   }, [])
 
   // ── Render steps ──
 
   if (step === 'welcome') {
-    return <WelcomeStep onNext={(m) => { setMode(m); setStep('phone') }} />
+    return (
+      <WelcomeStep onNext={(m) => {
+        setMode(m)
+        if (m === 'checkout') {
+          setStep('checkout-phone')
+        } else {
+          setStep('phone')
+        }
+      }} />
+    )
   }
+
+  // ── Checkout flow steps ──────────────────────────────────────────────────────
+
+  if (step === 'checkout-phone') {
+    return (
+      <PhoneStep
+        phone={phone}
+        setPhone={setPhone}
+        loading={checkoutLoading}
+        onNext={handleCheckoutPhoneNext}
+        onBack={() => { setPhone(''); setStep('welcome') }}
+        subtitle="We'll find your appointment"
+      />
+    )
+  }
+
+  if (step === 'checkout-next') {
+    if (!checkoutAppt) {
+      // No recurring appointment found
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center px-8" style={DARK_BG}>
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center mb-8"
+            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <Calendar size={36} style={{ color: 'rgba(255,255,255,0.3)' }} />
+          </div>
+          <h2 className="text-3xl font-bold text-white mb-3 text-center">No recurring appointment found</h2>
+          <p className="text-lg text-center max-w-sm mb-10" style={MUTED}>
+            We couldn't find a completed appointment with a recurring booking for this number today.
+          </p>
+          <button
+            onClick={() => { setPhone(''); setStep('welcome') }}
+            className="py-4 px-10 rounded-2xl text-white text-xl font-semibold"
+            style={{ ...PRIMARY_BTN, boxShadow: '0 0 28px rgba(13,148,136,0.4)' }}
+          >
+            Back to Home
+          </button>
+        </div>
+      )
+    }
+    return (
+      <RecurringNextStep
+        appt={checkoutAppt}
+        loading={bookingNext}
+        onConfirm={handleBookNext}
+        onSkip={() => { setPhone(''); setStep('welcome') }}
+        onBack={() => setStep('checkout-phone')}
+      />
+    )
+  }
+
+  if (step === 'checkout-done') {
+    return (
+      <RecurringDoneStep
+        appt={nextBooked}
+        onReset={handleReset}
+      />
+    )
+  }
+
+  // ── Appointment check-in flow ────────────────────────────────────────────────
 
   if (step === 'appt-list') {
     return (

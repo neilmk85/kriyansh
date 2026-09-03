@@ -277,6 +277,7 @@ export default function CustomerBooking() {
       notes:      '',
       payment_intent_id: '',
       deposit_paid: 0,
+      recurring_frequency: recurring || '',
     })
   }
 
