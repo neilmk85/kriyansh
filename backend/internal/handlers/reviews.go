@@ -114,11 +114,17 @@ func (a *App) SubmitReview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return redirect URLs so frontend can send high-raters to Yelp/Google
-	var yelpURL, googleURL string
+	var yelpURL, googleURL, ownerPhone, ownerEmail string
 	_ = a.DB.QueryRowContext(r.Context(),
-		`SELECT COALESCE(yelp_url,''), COALESCE(google_review_url,'')
+		`SELECT COALESCE(yelp_url,''), COALESCE(google_review_url,''),
+		        COALESCE(phone,''), COALESCE(email,'')
 		 FROM salon_settings WHERE salon_id = ?`, salonID).
-		Scan(&yelpURL, &googleURL)
+		Scan(&yelpURL, &googleURL, &ownerPhone, &ownerEmail)
+
+	// Alert owner on low ratings
+	if req.Rating <= 3 {
+		go a.alertOwnerLowRating(context.Background(), salonID, clientID, req.Rating, req.Comment, ownerPhone, ownerEmail)
+	}
 
 	a.JSON(w, http.StatusCreated, map[string]any{
 		"rating":            req.Rating,
@@ -309,31 +315,29 @@ func (a *App) GetOnlineReputation(w http.ResponseWriter, r *http.Request) {
 	sid := claims.SalonID
 	ctx := r.Context()
 
-	// review_responses has salon_id directly — use it for all queries
+	// ── Totals ────────────────────────────────────────────────────────────────
 	var avgRating float64
 	var total int
 	_ = a.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(AVG(rating),0), COUNT(*)
-		 FROM review_responses
-		 WHERE salon_id = ? AND is_public = 1`, sid).
+		 FROM review_responses WHERE salon_id = ? AND is_public = 1`, sid).
 		Scan(&avgRating, &total)
 
-	distRows, err := a.DB.QueryContext(ctx,
-		`SELECT rating, COUNT(*) as cnt
-		 FROM review_responses
-		 WHERE salon_id = ? AND is_public = 1
-		 GROUP BY rating`, sid)
+	// ── Distribution ─────────────────────────────────────────────────────────
+	distRows, _ := a.DB.QueryContext(ctx,
+		`SELECT rating, COUNT(*) FROM review_responses
+		 WHERE salon_id = ? AND is_public = 1 GROUP BY rating`, sid)
 	dist := map[string]int{"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
-	if err == nil {
+	if distRows != nil {
 		defer distRows.Close()
 		for distRows.Next() {
 			var star, cnt int
-			if distRows.Scan(&star, &cnt) == nil {
-				dist[fmt.Sprintf("%d", star)] = cnt
-			}
+			distRows.Scan(&star, &cnt)
+			dist[fmt.Sprintf("%d", star)] = cnt
 		}
 	}
 
+	// ── Shared reviewRow type ─────────────────────────────────────────────────
 	type reviewRow struct {
 		ID            int    `json:"id"`
 		ClientName    string `json:"client_name"`
@@ -344,37 +348,134 @@ func (a *App) GetOnlineReputation(w http.ResponseWriter, r *http.Request) {
 		OwnerResponse string `json:"owner_response"`
 	}
 
-	rows, err := a.DB.QueryContext(ctx,
-		`SELECT rr.id,
-		        CONCAT(c.first_name, ' ', LEFT(c.last_name,1), '.') AS client_name,
-		        rr.rating,
-		        COALESCE(rr.comment,''),
-		        DATE_FORMAT(rr.created_at,'%Y-%m-%d'),
-		        '',
-		        COALESCE(rr.owner_response,'')
-		 FROM review_responses rr
-		 JOIN clients c ON c.id = rr.client_id
-		 WHERE rr.salon_id = ? AND rr.is_public = 1
-		 ORDER BY rr.created_at DESC`, sid)
-	var reviews []reviewRow
-	if err == nil {
+	scanReviewRows := func(rows *sql.Rows) []reviewRow {
+		var out []reviewRow
+		if rows == nil {
+			return out
+		}
 		defer rows.Close()
 		for rows.Next() {
 			var rv reviewRow
 			if rows.Scan(&rv.ID, &rv.ClientName, &rv.Rating, &rv.Comment, &rv.CreatedAt, &rv.Service, &rv.OwnerResponse) == nil {
-				reviews = append(reviews, rv)
+				out = append(out, rv)
 			}
 		}
+		return out
 	}
+
+	const reviewSelect = `
+		SELECT rr.id,
+		       CONCAT(c.first_name,' ',LEFT(c.last_name,1),'.'),
+		       rr.rating,
+		       COALESCE(rr.comment,''),
+		       DATE_FORMAT(rr.created_at,'%Y-%m-%d'),
+		       COALESCE((
+		           SELECT s.name FROM transaction_items ti
+		           JOIN services s ON s.id = ti.service_id
+		           JOIN review_requests req ON req.transaction_id = ti.transaction_id
+		           WHERE req.id = rr.review_request_id LIMIT 1
+		       ),''),
+		       COALESCE(rr.owner_response,'')
+		FROM review_responses rr
+		JOIN clients c ON c.id = rr.client_id`
+
+	// Public reviews
+	pubRows, _ := a.DB.QueryContext(ctx,
+		reviewSelect+` WHERE rr.salon_id=? AND rr.is_public=1 ORDER BY rr.created_at DESC`, sid)
+	reviews := scanReviewRows(pubRows)
 	if reviews == nil {
 		reviews = []reviewRow{}
 	}
 
+	// Negative reviews (rating ≤ 3, all, not just public)
+	negRows, _ := a.DB.QueryContext(ctx,
+		reviewSelect+` WHERE rr.salon_id=? AND rr.rating<=3 ORDER BY rr.created_at DESC`, sid)
+	negativeReviews := scanReviewRows(negRows)
+	if negativeReviews == nil {
+		negativeReviews = []reviewRow{}
+	}
+
+	// ── Monthly trend — last 6 months ─────────────────────────────────────────
+	type trendPoint struct {
+		Month  string  `json:"month"`
+		Avg    float64 `json:"avg"`
+		Count  int     `json:"count"`
+	}
+	trendRows, _ := a.DB.QueryContext(ctx, `
+		SELECT DATE_FORMAT(created_at,'%Y-%m') AS mo,
+		       ROUND(AVG(rating),2), COUNT(*)
+		FROM review_responses
+		WHERE salon_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+		GROUP BY mo ORDER BY mo ASC`, sid)
+	trend := []trendPoint{}
+	if trendRows != nil {
+		defer trendRows.Close()
+		for trendRows.Next() {
+			var tp trendPoint
+			trendRows.Scan(&tp.Month, &tp.Avg, &tp.Count)
+			trend = append(trend, tp)
+		}
+	}
+
+	// ── By staff ─────────────────────────────────────────────────────────────
+	type staffRow struct {
+		StaffName string  `json:"staff_name"`
+		Avg       float64 `json:"avg"`
+		Count     int     `json:"count"`
+	}
+	staffRows, _ := a.DB.QueryContext(ctx, `
+		SELECT CONCAT(u.first_name,' ',u.last_name),
+		       ROUND(AVG(rr.rating),2), COUNT(*)
+		FROM review_responses rr
+		JOIN review_requests req ON req.id = rr.review_request_id
+		JOIN transactions t ON t.id = req.transaction_id
+		JOIN staff_profiles sp ON sp.id = t.staff_id
+		JOIN users u ON u.id = sp.user_id
+		WHERE rr.salon_id=?
+		GROUP BY u.id ORDER BY AVG(rr.rating) DESC`, sid)
+	byStaff := []staffRow{}
+	if staffRows != nil {
+		defer staffRows.Close()
+		for staffRows.Next() {
+			var sr staffRow
+			staffRows.Scan(&sr.StaffName, &sr.Avg, &sr.Count)
+			byStaff = append(byStaff, sr)
+		}
+	}
+
+	// ── By service ────────────────────────────────────────────────────────────
+	type serviceRow struct {
+		ServiceName string  `json:"service_name"`
+		Avg         float64 `json:"avg"`
+		Count       int     `json:"count"`
+	}
+	svcRows, _ := a.DB.QueryContext(ctx, `
+		SELECT s.name, ROUND(AVG(rr.rating),2), COUNT(*)
+		FROM review_responses rr
+		JOIN review_requests req ON req.id = rr.review_request_id
+		JOIN transaction_items ti ON ti.transaction_id = req.transaction_id
+		JOIN services s ON s.id = ti.service_id
+		WHERE rr.salon_id=?
+		GROUP BY s.id ORDER BY AVG(rr.rating) DESC`, sid)
+	byService := []serviceRow{}
+	if svcRows != nil {
+		defer svcRows.Close()
+		for svcRows.Next() {
+			var sv serviceRow
+			svcRows.Scan(&sv.ServiceName, &sv.Avg, &sv.Count)
+			byService = append(byService, sv)
+		}
+	}
+
 	a.JSON(w, http.StatusOK, map[string]any{
-		"avg_rating":    avgRating,
-		"total_reviews": total,
-		"distribution":  dist,
-		"reviews":       reviews,
+		"avg_rating":       avgRating,
+		"total_reviews":    total,
+		"distribution":     dist,
+		"reviews":          reviews,
+		"negative_reviews": negativeReviews,
+		"trend":            trend,
+		"by_staff":         byStaff,
+		"by_service":       byService,
 	})
 }
 
@@ -384,4 +485,38 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// alertOwnerLowRating sends the owner an SMS + email when a review comes in at ≤ 3 stars.
+func (a *App) alertOwnerLowRating(ctx context.Context, salonID, clientID int, rating int, comment, ownerPhone, ownerEmail string) {
+	var clientName string
+	_ = a.DB.QueryRowContext(ctx,
+		`SELECT CONCAT(first_name,' ',last_name) FROM clients WHERE id=?`, clientID).Scan(&clientName)
+
+	stars := ""
+	for i := 0; i < rating; i++ {
+		stars += "⭐"
+	}
+
+	smsBody := "⚠️ New " + stars + " review from " + clientName
+	if comment != "" {
+		smsBody += ": \"" + comment + "\""
+	}
+	smsBody += " — log in to respond."
+
+	if ownerPhone != "" {
+		a.Notifier.SendSMS(ownerPhone, smsBody)
+	}
+	if ownerEmail != "" {
+		html := `<p style="font-family:sans-serif">` +
+			`<strong>New low-rating review received</strong><br><br>` +
+			`<b>Client:</b> ` + clientName + `<br>` +
+			`<b>Rating:</b> ` + stars + `<br>`
+		if comment != "" {
+			html += `<b>Comment:</b> "` + comment + `"<br>`
+		}
+		html += `<br>Log in to your dashboard to respond.</p>`
+		a.Notifier.SendEmail(ownerEmail, "Salon Owner", "⚠️ New "+stars+" Review", html, smsBody)
+	}
+	slog.Info("owner alerted for low rating", "salon_id", salonID, "rating", rating, "client", clientName)
 }
