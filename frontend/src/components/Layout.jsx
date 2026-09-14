@@ -75,6 +75,7 @@ const NAV = [
     ],
   },
   // ─────────────────────────────────────────────────────────────────────────
+  { to: '/admin/brief',    icon: MessageCircle, label: 'Daily Brief'   },
   { to: '/admin/reports',  icon: PieChart,  label: 'Reports'       },
   { to: '/admin/pos',      icon: Receipt,   label: 'POS / Billing' },
   { to: '/admin/settings', icon: Settings2, label: 'Settings'      },

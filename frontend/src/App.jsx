@@ -51,6 +51,7 @@ import StaffKiosk from '@/pages/StaffKiosk'
 import WalkInQueue from '@/pages/WalkInQueue'
 import TVDisplay from '@/pages/TVDisplay'
 import OnlineReputation from '@/pages/OnlineReputation'
+import DailyBrief from '@/pages/DailyBrief'
 import AppointmentsList from '@/pages/AppointmentsList'
 import NewCampaign from '@/pages/NewCampaign'
 
@@ -136,6 +137,7 @@ export default function App() {
               <Route path="suppliers"   element={<Suppliers />} />
               <Route path="stocktakes"  element={<Stocktakes />} />
               <Route path="reputation"  element={<OnlineReputation />} />
+              <Route path="brief"       element={<DailyBrief />} />
               <Route path="pos"          element={<POS />} />
               <Route path="settings"     element={<Settings />} />
             </Route>

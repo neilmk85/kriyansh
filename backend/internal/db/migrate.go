@@ -813,6 +813,10 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("bridal tables: %w", err)
 	}
 
+	if err := migrateDailyBriefs(db); err != nil {
+		return fmt.Errorf("daily_briefs table: %w", err)
+	}
+
 	slog.Info("database migrations applied")
 	return nil
 }
@@ -846,6 +850,28 @@ func migrateWhatsAppTracking(db *sql.DB) error {
 }
 
 // ── Bridal / Wedding Engine ───────────────────────────────────────────────────
+func migrateDailyBriefs(db *sql.DB) error {
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS daily_briefs (
+			id           INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id     INT NOT NULL,
+			brief_date   DATE NOT NULL,
+			insights     JSON NOT NULL,
+			whatsapp_sent TINYINT NOT NULL DEFAULT 0,
+			sent_at      DATETIME NULL,
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY uq_salon_date (salon_id, brief_date),
+			INDEX idx_db_salon (salon_id, brief_date)
+		)`); err != nil {
+		return err
+	}
+	// Add owner_whatsapp to salon_settings for brief delivery
+	if err := addColumnIfNotExists(db, "salon_settings", "owner_whatsapp", "VARCHAR(20) NULL COMMENT 'Owner WhatsApp number for Daily Brief'"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func migrateBridalEngine(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS bridal_journeys (

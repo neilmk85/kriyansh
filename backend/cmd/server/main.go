@@ -73,6 +73,7 @@ func main() {
 	go app.RunReviewSender(cfg.AppURL)
 	// Background reminder loop — sends T-48h and T-3h SMS reminders
 	go app.RunReminderLoop(context.Background())
+	go app.RunDailyBriefLoop(context.Background())
 
 	// ── Router ────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -302,6 +303,10 @@ func main() {
 	mux.Handle("GET /api/v1/bridal/{id}",                                auth(http.HandlerFunc(app.GetBridalJourney)))
 	mux.Handle("PATCH /api/v1/bridal/{id}/cancel",                      auth(http.HandlerFunc(app.CancelBridalJourney)))
 	mux.Handle("PATCH /api/v1/bridal/{id}/milestones/{mid}",            auth(http.HandlerFunc(app.UpdateBridalMilestone)))
+
+	// ── Daily Business Brief ─────────────────────────────────────────────────
+	mux.Handle("GET /api/v1/brief/daily",   auth(http.HandlerFunc(app.GetDailyBrief)))
+	mux.Handle("GET /api/v1/brief/history", auth(http.HandlerFunc(app.GetBriefHistory)))
 
 	mux.Handle("GET /api/v1/marketing/campaigns", auth(http.HandlerFunc(app.ListCampaigns)))
 	mux.Handle("POST /api/v1/marketing/campaigns", auth(middleware.RequireRole("owner", "manager")(http.HandlerFunc(app.CreateCampaign))))
