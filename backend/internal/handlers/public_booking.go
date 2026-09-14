@@ -280,6 +280,7 @@ func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 		PaymentIntentID    string  `json:"payment_intent_id"`
 		DepositPaid        float64 `json:"deposit_paid"`
 		RecurringFrequency string  `json:"recurring_frequency"` // "Weekly","Every 2 Weeks","Monthly"
+		Source             string  `json:"source"`              // facebook | instagram | google_reserve | online
 	}
 	if err := a.Decode(r, &req); err != nil {
 		a.Error(w, http.StatusBadRequest, "invalid body")
@@ -384,10 +385,17 @@ func (a *App) PublicCreateAppointment(w http.ResponseWriter, r *http.Request) {
 	if req.RecurringFrequency != "" && req.RecurringFrequency != "One-time" {
 		recurringFreq = &req.RecurringFrequency
 	}
+	source := req.Source
+	switch source {
+	case "facebook", "instagram", "google_reserve":
+		// valid social sources
+	default:
+		source = "online"
+	}
 	res, err := a.DB.ExecContext(r.Context(),
 		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, status, notes, deposit_paid, source, payment_intent_id, recurring_frequency)
-		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, 'online', ?, ?)`,
-		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid, piID, recurringFreq)
+		 VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
+		salonID, clientID, actualStaffID, startAt, endAt, req.Notes, depositPaid, source, piID, recurringFreq)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

@@ -54,6 +54,7 @@ import OnlineReputation from '@/pages/OnlineReputation'
 import DailyBrief from '@/pages/DailyBrief'
 import AppointmentsList from '@/pages/AppointmentsList'
 import NewCampaign from '@/pages/NewCampaign'
+import OnlinePresence from '@/pages/OnlinePresence'
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -138,6 +139,7 @@ export default function App() {
               <Route path="stocktakes"  element={<Stocktakes />} />
               <Route path="reputation"  element={<OnlineReputation />} />
               <Route path="brief"       element={<DailyBrief />} />
+              <Route path="presence"   element={<OnlinePresence />} />
               <Route path="pos"          element={<POS />} />
               <Route path="settings"     element={<Settings />} />
             </Route>

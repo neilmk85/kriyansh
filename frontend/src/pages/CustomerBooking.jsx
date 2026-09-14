@@ -282,6 +282,8 @@ export default function CustomerBooking() {
       try { return JSON.parse(localStorage.getItem('salonos_customer')) || {} }
       catch { return {} }
     })()
+    const urlSource = new URLSearchParams(window.location.search).get('source') || ''
+    const validSources = ['facebook', 'instagram', 'google_reserve']
     bookMutation.mutate({
       first_name: customer.first_name || '',
       last_name:  customer.last_name  || '',
@@ -294,6 +296,7 @@ export default function CustomerBooking() {
       payment_intent_id: '',
       deposit_paid: 0,
       recurring_frequency: recurring || '',
+      source: validSources.includes(urlSource) ? urlSource : 'online',
     })
   }
 

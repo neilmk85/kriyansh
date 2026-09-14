@@ -5,7 +5,7 @@ import {
   UserCog, Receipt, Menu, X, LogOut, ChevronRight, Settings2,
   Gift, Package, BadgeCheck, Megaphone, BarChart2, Zap,
   MessageCircle, Send, Layers, ChevronDown, ShoppingBag, PieChart, FileText, Clock,
-  ShoppingCart, MonitorSmartphone, ClipboardList, Truck, Star
+  ShoppingCart, MonitorSmartphone, ClipboardList, Truck, Star, Globe
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { cn, initials } from '@/lib/utils'
@@ -76,6 +76,7 @@ const NAV = [
   },
   // ─────────────────────────────────────────────────────────────────────────
   { to: '/admin/brief',    icon: MessageCircle, label: 'Daily Brief'   },
+  { to: '/admin/presence', icon: Globe,          label: 'Online Presence' },
   { to: '/admin/reports',  icon: PieChart,  label: 'Reports'       },
   { to: '/admin/pos',      icon: Receipt,   label: 'POS / Billing' },
   { to: '/admin/settings', icon: Settings2, label: 'Settings'      },

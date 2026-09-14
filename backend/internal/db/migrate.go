@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // addColumnIfNotExists safely adds a column only when it doesn't already exist.
@@ -817,6 +818,10 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("daily_briefs table: %w", err)
 	}
 
+	if err := migrateOnlinePresence(db); err != nil {
+		return fmt.Errorf("online presence: %w", err)
+	}
+
 	slog.Info("database migrations applied")
 	return nil
 }
@@ -847,6 +852,24 @@ func migrateWhatsAppTracking(db *sql.DB) error {
 			INDEX idx_wa_sent    (salon_id, sent_at)
 		)`)
 	return err
+}
+
+// ── Online Presence / Social Booking ─────────────────────────────────────────
+func migrateOnlinePresence(db *sql.DB) error {
+	// Add facebook to the appointments.source ENUM if not already present
+	var colType string
+	_ = db.QueryRow(`
+		SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='appointments' AND COLUMN_NAME='source'`).Scan(&colType)
+	if colType != "" && !strings.Contains(colType, "'facebook'") {
+		_, err := db.Exec(`ALTER TABLE appointments MODIFY COLUMN source
+			ENUM('walk_in','online','phone','google_reserve','instagram','facebook','reception')
+			DEFAULT 'online'`)
+		if err != nil {
+			return fmt.Errorf("alter appointments.source enum: %w", err)
+		}
+	}
+	return nil
 }
 
 // ── Bridal / Wedding Engine ───────────────────────────────────────────────────
