@@ -809,6 +809,10 @@ func Migrate(db *sql.DB) error {
 		return fmt.Errorf("whatsapp_messages table: %w", err)
 	}
 
+	if err := migrateBridalEngine(db); err != nil {
+		return fmt.Errorf("bridal tables: %w", err)
+	}
+
 	slog.Info("database migrations applied")
 	return nil
 }
@@ -837,6 +841,40 @@ func migrateWhatsAppTracking(db *sql.DB) error {
 			INDEX idx_wa_token   (tracking_token),
 			INDEX idx_wa_type    (salon_id, message_type),
 			INDEX idx_wa_sent    (salon_id, sent_at)
+		)`)
+	return err
+}
+
+// ── Bridal / Wedding Engine ───────────────────────────────────────────────────
+func migrateBridalEngine(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS bridal_journeys (
+			id           INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id     INT NOT NULL,
+			client_id    INT NOT NULL,
+			wedding_date DATE NOT NULL,
+			notes        TEXT,
+			status       ENUM('active','completed','cancelled') NOT NULL DEFAULT 'active',
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_bj_salon  (salon_id),
+			INDEX idx_bj_client (client_id),
+			INDEX idx_bj_date   (salon_id, wedding_date)
+		)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS bridal_milestones (
+			id             INT PRIMARY KEY AUTO_INCREMENT,
+			journey_id     INT NOT NULL,
+			days_before    INT NOT NULL,
+			label          VARCHAR(255) NOT NULL,
+			scheduled_date DATE NOT NULL,
+			appointment_id INT NULL,
+			status         ENUM('pending','booked','completed','skipped') NOT NULL DEFAULT 'pending',
+			reminder_sent  TINYINT NOT NULL DEFAULT 0,
+			INDEX idx_bm_journey (journey_id),
+			INDEX idx_bm_date    (scheduled_date, reminder_sent)
 		)`)
 	return err
 }

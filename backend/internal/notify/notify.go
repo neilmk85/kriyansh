@@ -46,6 +46,9 @@ func New(cfg Config) *Notifier {
 // SendSMS sends a plain SMS via Twilio.
 func (n *Notifier) SendSMS(to, body string) { n.sendSMS(to, body) }
 
+// HasWhatsApp reports whether WhatsApp sending is configured.
+func (n *Notifier) HasWhatsApp() bool { return n.cfg.TwilioWAFrom != "" }
+
 // SendWhatsApp sends a WhatsApp message via Twilio.
 func (n *Notifier) SendWhatsApp(to, body string) { n.sendWhatsApp(to, body) }
 

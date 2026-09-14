@@ -20,6 +20,7 @@ func (a *App) RunReminderLoop(ctx context.Context) {
 			a.sendBirthdayGreetings(ctx)
 			a.sendRebookingReminders(ctx)
 			a.sendInactiveCustomerAlerts(ctx)
+			a.sendBridalMilestoneReminders(ctx)
 		}
 	}
 }

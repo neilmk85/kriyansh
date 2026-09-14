@@ -296,6 +296,13 @@ func main() {
 	// Marketing
 	mux.Handle("GET /api/v1/whatsapp/performance", auth(http.HandlerFunc(app.WhatsAppPerformance)))
 
+	// ── Bridal / Wedding Engine ───────────────────────────────────────────────
+	mux.Handle("GET /api/v1/bridal",                                     auth(http.HandlerFunc(app.ListBridalJourneys)))
+	mux.Handle("POST /api/v1/bridal",                                    auth(http.HandlerFunc(app.CreateBridalJourney)))
+	mux.Handle("GET /api/v1/bridal/{id}",                                auth(http.HandlerFunc(app.GetBridalJourney)))
+	mux.Handle("PATCH /api/v1/bridal/{id}/cancel",                      auth(http.HandlerFunc(app.CancelBridalJourney)))
+	mux.Handle("PATCH /api/v1/bridal/{id}/milestones/{mid}",            auth(http.HandlerFunc(app.UpdateBridalMilestone)))
+
 	mux.Handle("GET /api/v1/marketing/campaigns", auth(http.HandlerFunc(app.ListCampaigns)))
 	mux.Handle("POST /api/v1/marketing/campaigns", auth(middleware.RequireRole("owner", "manager")(http.HandlerFunc(app.CreateCampaign))))
 	mux.Handle("GET /api/v1/marketing/segments/{segment}/count", auth(http.HandlerFunc(app.GetSegmentCount)))
