@@ -4,16 +4,6 @@ import { ArrowLeft, Gift, Check, Search, Copy, Sparkles } from 'lucide-react'
 
 const AMOUNTS = [25, 50, 75, 100, 150, 200]
 
-function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let code = ''
-  for (let i = 0; i < 16; i++) {
-    if (i > 0 && i % 4 === 0) code += '-'
-    code += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return code
-}
-
 /* ── Gift Card Visual ──────────────────────────────────────── */
 function GiftCardPreview({ amount, senderName, recipientName, message }) {
   return (
@@ -139,13 +129,38 @@ export default function CustomerGiftCard() {
   const [message, setMessage]         = useState('')
   const [generatedCode, setGeneratedCode] = useState('')
   const [copied, setCopied]           = useState(false)
+  const [submitting, setSubmitting]   = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const finalAmount = customAmt ? parseFloat(customAmt) || 0 : amount
 
-  function handlePurchase() {
-    const code = generateCode()
-    setGeneratedCode(code)
-    setStep(3)
+  async function handlePurchase() {
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      const res = await fetch('/api/v1/public/gift-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: finalAmount,
+          recipient_name: recipientName,
+          recipient_email: recipientEmail,
+          sender_name: senderName,
+          message,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || 'Could not submit your request')
+      }
+      const data = await res.json()
+      setGeneratedCode(data.code)
+      setStep(3)
+    } catch (e) {
+      setSubmitError(e.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function handleCopy() {
@@ -157,6 +172,7 @@ export default function CustomerGiftCard() {
   function reset() {
     setStep(1); setAmount(50); setCustomAmt(''); setRecipientName('')
     setRecipientEmail(''); setSenderName(''); setMessage(''); setGeneratedCode('')
+    setSubmitError('')
   }
 
   return (
@@ -169,7 +185,7 @@ export default function CustomerGiftCard() {
             <ArrowLeft size={18} />
           </button>
           <span className="text-[15px] font-bold text-slate-800 flex-1">
-            {tab === 'check' ? 'Check gift card balance' : step === 3 ? 'Gift card sent!' : 'Send a gift card'}
+            {tab === 'check' ? 'Check gift card balance' : step === 3 ? 'Request received!' : 'Send a gift card'}
           </span>
           {step === 1 && (
             <button onClick={() => setTab(t => t === 'send' ? 'check' : 'send')}
@@ -256,12 +272,18 @@ export default function CustomerGiftCard() {
                   <span className="text-[13px] text-indigo-700 font-semibold">Total charge</span>
                   <span className="text-[18px] font-black text-indigo-700">${finalAmount}</span>
                 </div>
+                <p className="text-[12px] text-slate-400">
+                  We'll call you at checkout to collect payment before the gift card is activated.
+                </p>
+                {submitError && (
+                  <p className="text-[12px] text-red-500 font-medium">{submitError}</p>
+                )}
                 <button
                   onClick={handlePurchase}
-                  disabled={!recipientName || !recipientEmail}
+                  disabled={!recipientName || !recipientEmail || submitting}
                   className="w-full py-3 rounded-xl text-white text-[14px] font-bold disabled:opacity-40 hover:opacity-90 transition-opacity"
                   style={{ background: 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)' }}>
-                  Send gift card · ${finalAmount}
+                  {submitting ? 'Submitting…' : `Send gift card · $${finalAmount}`}
                 </button>
               </div>
             )}
@@ -273,15 +295,15 @@ export default function CustomerGiftCard() {
                   <Check size={26} className="text-emerald-600" />
                 </div>
                 <div>
-                  <div className="text-[20px] font-black text-slate-900">Gift card sent!</div>
+                  <div className="text-[20px] font-black text-slate-900">Almost there!</div>
                   <div className="text-[13px] text-slate-400 mt-1">
-                    A ${finalAmount} gift card has been sent to <strong>{recipientEmail}</strong>
+                    We'll call you to collect payment for the ${finalAmount} gift card for <strong>{recipientEmail}</strong>. It'll be active as soon as payment is confirmed.
                   </div>
                 </div>
 
                 {/* Code display */}
                 <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Gift card code</div>
+                  <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Gift card code (pending payment)</div>
                   <div className="text-[20px] font-mono font-black text-slate-900 tracking-widest">{generatedCode}</div>
                   <button onClick={handleCopy}
                     className={`flex items-center gap-1.5 mx-auto text-[12px] font-semibold transition-colors ${copied ? 'text-emerald-600' : 'text-indigo-600 hover:text-indigo-700'}`}>
@@ -291,7 +313,7 @@ export default function CustomerGiftCard() {
                 </div>
 
                 <div className="text-[12px] text-slate-400 bg-slate-50 rounded-xl p-3 text-left">
-                  <strong className="text-slate-600">How to redeem:</strong> Share this code with {recipientName}. They can use it at checkout when booking a service at Kriyansh Beauty Bar — online or in-store.
+                  <strong className="text-slate-600">How to redeem:</strong> Once payment is confirmed and the card is active, share this code with {recipientName}. They can use it at checkout when booking a service at Kriyansh Beauty Bar — online or in-store.
                 </div>
 
                 <div className="flex gap-3">

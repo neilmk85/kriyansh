@@ -6,6 +6,7 @@ import {
   AlertTriangle, Check, ChevronRight, ChevronDown, ChevronUp,
   Smartphone, Mail, Phone, Calendar, Star, Clock, X, Search,
   RotateCcw, XCircle, Gift, Package, Tag, RefreshCw, ChevronLeft,
+  CalendarDays, RotateCcw as Renew,
 } from 'lucide-react'
 
 
@@ -67,7 +68,7 @@ function ProfileSection({ onSave, onRefresh }) {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) return
-    fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setForm({
         firstName:  d.first_name  || '',
@@ -86,7 +87,7 @@ function ProfileSection({ onSave, onRefresh }) {
     if (!token) return
     setSaving(true)
     try {
-      const res = await fetch('/api/customer/profile', {
+      const res = await fetch('/api/v1/customer/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -484,7 +485,7 @@ function ActivitySection({ navigate, onSave }) {
   function fetchAppointments() {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) { setLoading(false); return }
-    return fetch('/api/customer/appointments', { headers: { Authorization: `Bearer ${token}` } })
+    return fetch('/api/v1/customer/appointments', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setItems(data.map(apiApptToItem)) })
       .catch(() => {})
@@ -495,7 +496,7 @@ function ActivitySection({ navigate, onSave }) {
     fetchAppointments()
     const token = localStorage.getItem('salonos_customer_token')
     if (token) {
-      fetch('/api/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
+      fetch('/api/v1/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .then(data => { if (data && typeof data.balance === 'number') setLoyalty(data) })
         .catch(() => {})
@@ -752,7 +753,7 @@ function WalletSection() {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) return
-    fetch('/api/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/loyalty', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => { if (data && typeof data.balance === 'number') setLoyalty(data) })
       .catch(() => {})
@@ -867,7 +868,7 @@ function PackagesSection() {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) return
-    fetch('/api/customer/packages', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/packages', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => setPackages(Array.isArray(data) ? data : []))
       .catch(() => setPackages([]))
@@ -956,7 +957,7 @@ function HistorySection() {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) return
-    fetch('/api/customer/transactions', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/transactions', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => setTxns(Array.isArray(data) ? data : []))
       .catch(() => setTxns([]))
@@ -1001,6 +1002,91 @@ function HistorySection() {
   )
 }
 
+/* ── RetentionCard ──────────────────────────────────────────── */
+function useRetentionData() {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    const token = localStorage.getItem('salonos_customer_token')
+    if (!token) return
+    Promise.all([
+      fetch('/api/v1/customer/membership', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/v1/customer/packages',   { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch('/api/v1/customer/loyalty',    { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([membership, packages, loyalty]) => {
+      setData({ membership, packages: Array.isArray(packages) ? packages : [], loyalty })
+    })
+  }, [])
+  return data
+}
+
+function RetentionCard() {
+  const data = useRetentionData()
+  if (!data) return null
+
+  const { membership, packages, loyalty } = data
+  const activePackages = packages.filter(p => p.status === 'active')
+  const hasAny = membership || activePackages.length > 0 || loyalty?.balance > 0
+
+  if (!hasAny) return null
+
+  const daysLeft = membership?.days_left ?? -1
+  const expiryUrgent   = daysLeft >= 0 && daysLeft <= 7
+  const expiryModerate = daysLeft >= 0 && daysLeft > 7 && daysLeft <= 30
+
+  return (
+    <div className="mb-4 mx-1 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5">
+        <Star size={11} className="text-amber-400" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Your Status</span>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {membership && (
+          <div className="flex items-center justify-between px-3 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: (membership.color || '#0D9488') + '22' }}>
+                <Tag size={11} style={{ color: membership.color || '#0D9488' }} />
+              </div>
+              <span className="text-[12px] font-semibold text-slate-700 truncate">{membership.name}</span>
+            </div>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-1 ${
+              expiryUrgent   ? 'bg-red-100 text-red-600' :
+              expiryModerate ? 'bg-amber-100 text-amber-700' :
+              daysLeft >= 0  ? 'bg-green-100 text-green-700' :
+              'bg-slate-100 text-slate-500'
+            }`}>
+              {daysLeft >= 0 ? `${daysLeft}d` : 'Active'}
+            </span>
+          </div>
+        )}
+        {activePackages.slice(0, 2).map(p => (
+          <div key={p.id} className="flex items-center justify-between px-3 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                <Package size={11} className="text-indigo-500" />
+              </div>
+              <span className="text-[12px] font-semibold text-slate-700 truncate">{p.name}</span>
+            </div>
+            <span className="text-[10px] font-bold text-slate-500 shrink-0 ml-1">{p.used_count}/{p.total_qty}</span>
+          </div>
+        ))}
+        {loyalty && loyalty.balance > 0 && (
+          <div className="flex items-center justify-between px-3 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                <Star size={11} className="text-amber-500" />
+              </div>
+              <span className="text-[12px] font-semibold text-slate-700">{loyalty.balance.toLocaleString()} pts</span>
+            </div>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-1" style={{ background: (loyalty.tier_color || '#6366F1') + '22', color: loyalty.tier_color || '#6366F1' }}>
+              {loyalty.tier_name || 'Bronze'}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function MembershipSection() {
   const [membership, setMembership] = useState(undefined)
   const [loading, setLoading] = useState(true)
@@ -1008,7 +1094,7 @@ function MembershipSection() {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) { setLoading(false); return }
-    fetch('/api/customer/membership', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/membership', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => setMembership(data))
       .catch(() => {})
@@ -1035,7 +1121,29 @@ function MembershipSection() {
           <p className="text-[13px] text-slate-400">Ask your salon to set up a membership plan for you</p>
         </div>
       ) : (
-        <div className="max-w-md">
+        <div className="max-w-md space-y-4">
+          {/* Expiry urgency banner */}
+          {(() => {
+            const dl = membership.days_left ?? -1
+            if (dl < 0) return null
+            const urgent   = dl <= 7
+            const moderate = dl > 7 && dl <= 30
+            if (!urgent && !moderate) return null
+            return (
+              <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl ${urgent ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'}`}>
+                <CalendarDays size={16} className={urgent ? 'text-red-500 shrink-0' : 'text-amber-500 shrink-0'} />
+                <div>
+                  <p className={`text-[13px] font-bold ${urgent ? 'text-red-700' : 'text-amber-700'}`}>
+                    {dl === 0 ? 'Expires today' : `Expires in ${dl} day${dl !== 1 ? 's' : ''}`}
+                  </p>
+                  <p className={`text-[11px] ${urgent ? 'text-red-500' : 'text-amber-600'}`}>
+                    Ask your salon to renew your membership to keep your benefits
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
+
           <div className="rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)]"
             style={{ background: `linear-gradient(135deg, ${membership.color || '#0D9488'}, ${membership.color ? membership.color + 'cc' : '#6366F1'})` }}>
             <div className="p-6">
@@ -1062,6 +1170,14 @@ function MembershipSection() {
                     <p className="text-white text-[18px] font-black">{membership.discount_pct}% off</p>
                   </div>
                 )}
+                {membership.days_left >= 0 && (
+                  <div className={`bg-white/15 rounded-xl px-4 py-3 ${membership.discount_pct > 0 ? 'col-span-2' : ''}`}>
+                    <p className="text-white/60 text-[10px] font-bold uppercase tracking-wider mb-1">Expires</p>
+                    <p className={`text-[18px] font-black ${membership.days_left <= 7 ? 'text-red-300' : membership.days_left <= 30 ? 'text-amber-200' : 'text-white'}`}>
+                      {membership.days_left === 0 ? 'Today' : `in ${membership.days_left} days`}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
             <div className="bg-black/10 px-6 py-3 flex items-center justify-between">
@@ -1083,7 +1199,7 @@ function SettingsSection({ onSave, navigate }) {
   useEffect(() => {
     const token = localStorage.getItem('salonos_customer_token')
     if (!token) return
-    fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/v1/customer/profile', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setNotifs(n => ({ ...n, smsMkt: d.sms_consent ?? true })))
       .catch(() => {})
@@ -1095,8 +1211,8 @@ function SettingsSection({ onSave, navigate }) {
     if (k === 'smsMkt') {
       const token = localStorage.getItem('salonos_customer_token')
       if (!token) return
-      const profile = await fetch('/api/customer/profile', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => ({}))
-      await fetch('/api/customer/profile', {
+      const profile = await fetch('/api/v1/customer/profile', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()).catch(() => ({}))
+      await fetch('/api/v1/customer/profile', {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...profile, sms_consent: next }),
@@ -1115,7 +1231,7 @@ function SettingsSection({ onSave, navigate }) {
     setPwSaving(true)
     const token = localStorage.getItem('salonos_customer_token')
     try {
-      const res = await fetch('/api/customer/auth/password', {
+      const res = await fetch('/api/v1/customer/auth/password', {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
@@ -1389,6 +1505,8 @@ export default function CustomerAccount() {
               <div className="text-[11px] text-slate-400 truncate">{customer.phone}</div>
             </div>
           </div>
+
+          <RetentionCard />
 
           <nav className="space-y-0.5">
             {SIDEBAR_ITEMS.map(item => (

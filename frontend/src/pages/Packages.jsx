@@ -286,13 +286,13 @@ function PackageCard({ pkg, selected, onClick, onEdit, onDelete }) {
       )}
 
       {/* Service pills */}
-      {pkg.services?.length > 0 && (
+      {pkg.service_names && (
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {pkg.services.map((svc, i) => (
+          {pkg.service_names.split(', ').map((name, i) => (
             <span
               key={i}
               className="text-[11px] px-2 py-0.5 rounded-full bg-[#F0FDFA] text-[#0D9488] border border-[#CCFBF1] font-medium">
-              {svc.name} ×{svc.qty}
+              {name}
             </span>
           ))}
         </div>
@@ -488,7 +488,7 @@ function ActivePackagesTab({
         const expiringSoon = daysLeft !== null && daysLeft < 30
 
         return (
-          <div key={cp.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+          <div key={cp.client_package_id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-[14px] font-bold text-slate-800">{cp.package_name ?? cp.name}</p>
@@ -520,14 +520,13 @@ function ActivePackagesTab({
             {cp.services?.length > 0 && (
               <div className="space-y-2">
                 {cp.services.map((svc, i) => {
-                  const total = svc.qty ?? 1
-                  const used  = svc.used ?? 0
-                  const remaining = total - used
+                  const total     = svc.total_qty ?? 1
+                  const remaining = svc.remaining_qty ?? 0
                   const pct = remaining / total
                   return (
                     <div key={i} className="space-y-1">
                       <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-600 font-medium">{svc.name}</span>
+                        <span className="text-slate-600 font-medium">{svc.service_name}</span>
                         <span className={cn('font-semibold', remaining === 0 ? 'text-slate-400' : 'text-[#0D9488]')}>
                           {remaining}/{total} remaining
                         </span>
@@ -544,28 +543,28 @@ function ActivePackagesTab({
             )}
 
             <div className="flex items-center gap-2 pt-1">
-              {cp.status === 'active' && (cp.services?.some(s => (s.qty - (s.used ?? 0)) > 0)) && (
+              {cp.status === 'active' && (cp.services?.some(s => s.remaining_qty > 0)) && (
                 <button
                   onClick={() => onRedeem({
-                    clientPackageId: cp.id,
+                    clientPackageId: cp.client_package_id,
                     packageName: cp.package_name ?? cp.name,
                     clientName: `${activeClient.first_name} ${activeClient.last_name}`,
-                    services: cp.services?.filter(s => (s.qty - (s.used ?? 0)) > 0) ?? [],
+                    services: cp.services?.filter(s => s.remaining_qty > 0) ?? [],
                   })}
                   className="px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] text-[11px] font-semibold  transition-colors">
                   Redeem
                 </button>
               )}
               <button
-                onClick={() => setHistoryPkg(historyPkg?.id === cp.id ? null : cp)}
+                onClick={() => setHistoryPkg(historyPkg?.client_package_id === cp.client_package_id ? null : cp)}
                 className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-[11px] font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1">
                 View History
-                <ChevronDown size={11} className={cn('transition-transform', historyPkg?.id === cp.id ? 'rotate-180' : '')} />
+                <ChevronDown size={11} className={cn('transition-transform', historyPkg?.client_package_id === cp.client_package_id ? 'rotate-180' : '')} />
               </button>
             </div>
 
             {/* History */}
-            {historyPkg?.id === cp.id && cp.redemptions?.length > 0 && (
+            {historyPkg?.client_package_id === cp.client_package_id && cp.redemptions?.length > 0 && (
               <div className="border-t border-slate-100 pt-3 space-y-1.5">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Redemption History</p>
                 {cp.redemptions.map((r, i) => (
@@ -576,7 +575,7 @@ function ActivePackagesTab({
                 ))}
               </div>
             )}
-            {historyPkg?.id === cp.id && (!cp.redemptions || cp.redemptions.length === 0) && (
+            {historyPkg?.client_package_id === cp.client_package_id && (!cp.redemptions || cp.redemptions.length === 0) && (
               <div className="border-t border-slate-100 pt-3 text-center text-[12px] text-slate-400">
                 No redemptions yet
               </div>
@@ -811,8 +810,8 @@ function RedeemModal({ data, onClose, onRedeemed }) {
           <Field label="Select Service to Redeem">
             <div className="space-y-2">
               {services.map((svc, i) => {
-                const svcId = svc.service_id ?? svc.id
-                const remaining = (svc.qty ?? 1) - (svc.used ?? 0)
+                const svcId    = svc.service_id
+                const remaining = svc.remaining_qty ?? 0
                 return (
                   <label key={i}
                     className={cn(
@@ -830,7 +829,7 @@ function RedeemModal({ data, onClose, onRedeemed }) {
                       className="accent-[#0D9488]"
                     />
                     <div className="flex-1">
-                      <p className="text-[13px] font-semibold text-slate-800">{svc.name}</p>
+                      <p className="text-[13px] font-semibold text-slate-800">{svc.service_name}</p>
                       <p className="text-[11px] text-slate-400">{remaining} remaining</p>
                     </div>
                   </label>

@@ -45,6 +45,9 @@ type Service struct {
 	DepositAmt  float64 `json:"deposit_amt"`
 	Gender      string  `json:"gender"`
 	IsActive    bool    `json:"is_active"`
+	// StaffIDs: staff members allowed to perform this service. An empty list
+	// means unrestricted — any active staff member can be booked for it.
+	StaffIDs []uint `json:"staff_ids"`
 }
 
 type ServiceCategory struct {
@@ -56,36 +59,53 @@ type ServiceCategory struct {
 }
 
 type Client struct {
-	ID             uint      `json:"id"`
-	SalonID        uint      `json:"salon_id"`
-	FirstName      string    `json:"first_name"`
-	LastName       string    `json:"last_name"`
-	Email          string    `json:"email"`
-	Phone          string    `json:"phone"`
-	Gender         string    `json:"gender"`
-	Notes          string    `json:"notes"`
-	LoyaltyPoints  int        `json:"loyalty_points"`
-	TotalVisits    int        `json:"total_visits"`
-	TotalSpend     float64    `json:"total_spend"`
-	SMSConsent     bool       `json:"sms_consent"`
-	IsActive       bool       `json:"is_active"`
-	LastVisitAt    *time.Time `json:"last_visit_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID               uint       `json:"id"`
+	SalonID          uint       `json:"salon_id"`
+	FirstName        string     `json:"first_name"`
+	LastName         string     `json:"last_name"`
+	Email            string     `json:"email"`
+	Phone            string     `json:"phone"`
+	Gender           string     `json:"gender"`
+	Notes            string     `json:"notes"`
+	LoyaltyPoints    int        `json:"loyalty_points"`
+	TotalVisits      int        `json:"total_visits"`
+	TotalSpend       float64    `json:"total_spend"`
+	SMSConsent       bool       `json:"sms_consent"`
+	IsActive         bool       `json:"is_active"`
+	LastVisitAt      *time.Time `json:"last_visit_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	FreshaID         *string    `json:"fresha_id,omitempty"`
+	MarketingConsent bool       `json:"marketing_consent"`
+	Telephone        *string    `json:"telephone,omitempty"`
+	AddressLine1     *string    `json:"address_line1,omitempty"`
+	AddressLine2     *string    `json:"address_line2,omitempty"`
+	AddressArea      *string    `json:"address_area,omitempty"`
+	AddressCity      *string    `json:"address_city,omitempty"`
+	AddressState     *string    `json:"address_state,omitempty"`
+	AddressPostcode  *string    `json:"address_postcode,omitempty"`
+	StaffAlert       *string    `json:"staff_alert,omitempty"`
+	Tags             *string    `json:"tags,omitempty"`
+	AvatarURL        *string    `json:"avatar_url,omitempty"`
+	DateOfBirth      *string    `json:"date_of_birth,omitempty"`
+	Anniversary      *string    `json:"anniversary,omitempty"`
+	Preferences      *string    `json:"preferences,omitempty"`
 }
 
 type StaffProfile struct {
-	ID             uint    `json:"id"`
-	UserID         uint    `json:"user_id"`
-	SalonID        uint    `json:"salon_id"`
-	FirstName      string  `json:"first_name"`
-	LastName       string  `json:"last_name"`
-	Email          string  `json:"email"`
-	Bio            string  `json:"bio"`
-	Specializations string `json:"specializations"`
-	CommissionPct  float64 `json:"commission_pct"`
-	AcceptsOnline  bool    `json:"accepts_online"`
-	Color          string  `json:"color"`
-	AvatarURL      string  `json:"avatar_url,omitempty"`
+	ID              uint    `json:"id"`
+	UserID          uint    `json:"user_id"`
+	SalonID         uint    `json:"salon_id"`
+	FirstName       string  `json:"first_name"`
+	LastName        string  `json:"last_name"`
+	Email           string  `json:"email"`
+	Phone           string  `json:"phone"`
+	Role            string  `json:"role"`
+	Bio             string  `json:"bio"`
+	Specializations string  `json:"specializations"`
+	CommissionPct   float64 `json:"commission_pct"`
+	AcceptsOnline   bool    `json:"accepts_online"`
+	Color           string  `json:"color"`
+	AvatarURL       string  `json:"avatar_url,omitempty"`
 }
 
 type Appointment struct {

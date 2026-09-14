@@ -23,23 +23,36 @@ type createShiftRequest struct {
 	Notes     string `json:"notes"`
 }
 
-// ListShifts GET /api/shifts?week_start=YYYY-MM-DD
+// ListShifts GET /api/shifts?week_start=YYYY-MM-DD  OR  ?month=YYYY-MM
 func (a *App) ListShifts(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
 
-	weekStart := r.URL.Query().Get("week_start")
-	if weekStart == "" {
-		now := time.Now()
-		sun := now.AddDate(0, 0, -int(now.Weekday()))
-		weekStart = sun.Format("2006-01-02")
-	}
+	var start, end time.Time
 
-	start, err := time.Parse("2006-01-02", weekStart)
-	if err != nil {
-		a.Error(w, http.StatusBadRequest, "invalid week_start: use YYYY-MM-DD")
-		return
+	if monthParam := r.URL.Query().Get("month"); monthParam != "" {
+		// month mode: return all shifts in that calendar month
+		t, err := time.Parse("2006-01", monthParam)
+		if err != nil {
+			a.Error(w, http.StatusBadRequest, "invalid month: use YYYY-MM")
+			return
+		}
+		start = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+		end = start.AddDate(0, 1, -1)
+	} else {
+		weekStart := r.URL.Query().Get("week_start")
+		if weekStart == "" {
+			now := time.Now()
+			sun := now.AddDate(0, 0, -int(now.Weekday()))
+			weekStart = sun.Format("2006-01-02")
+		}
+		var err error
+		start, err = time.Parse("2006-01-02", weekStart)
+		if err != nil {
+			a.Error(w, http.StatusBadRequest, "invalid week_start: use YYYY-MM-DD")
+			return
+		}
+		end = start.AddDate(0, 0, 6)
 	}
-	end := start.AddDate(0, 0, 6)
 
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT id, salon_id, staff_id,

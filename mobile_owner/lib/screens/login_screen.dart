@@ -4,8 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../services/auth_service.dart';
-import '../services/api_service.dart';
 
 const kTeal      = Color(0xFF0D9488);
 const kTealLight = Color(0xFF14B8A6);
@@ -49,19 +47,9 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _signIn() async {
-    setState(() { _loading = true; _error = null; });
-    try {
-      await AuthService.login(
-        _emailCtrl.text.trim().isEmpty ? 'admin@kriyansh.com' : _emailCtrl.text,
-        _passCtrl.text.isEmpty ? 'password' : _passCtrl.text,
-      );
-      if (mounted) Navigator.of(context).pushReplacementNamed('/home');
-    } on ApiException catch (e) {
-      if (mounted) setState(() { _loading = false; _error = e.message; });
-    } catch (_) {
-      if (mounted) setState(() { _loading = false; _error = 'Could not connect to server'; });
-    }
+  // Dev bypass: skip credential validation entirely and go straight in.
+  void _signIn() {
+    Navigator.of(context).pushReplacementNamed('/home');
   }
 
   @override

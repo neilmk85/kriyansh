@@ -13,17 +13,18 @@ import (
 // ─── Staff Performance ────────────────────────────────────────────────────────
 
 type staffPerfRow struct {
-	ID               int     `json:"id"`
-	Name             string  `json:"name"`
-	Email            string  `json:"email"`
-	AppointmentCount int     `json:"appointment_count"`
-	RevenueEstimate  float64 `json:"revenue_estimate"`
-	TotalRevenue     float64 `json:"total_revenue"`
-	AvgTicket        float64 `json:"avg_ticket"`
-	UniqueClients    int     `json:"unique_clients"`
-	RebookingRate    float64 `json:"rebooking_rate"`
-	TotalHoursWorked float64 `json:"total_hours_worked"`
-	RevenuePerHour   float64 `json:"revenue_per_hour"`
+	ID                int     `json:"id"`
+	Name              string  `json:"name"`
+	Email             string  `json:"email"`
+	Role              string  `json:"role"`
+	TotalAppointments int     `json:"total_appointments"`
+	RevenueEstimate   float64 `json:"revenue_estimate"`
+	TotalRevenue      float64 `json:"total_revenue"`
+	AvgTicket         float64 `json:"avg_ticket"`
+	UniqueClients     int     `json:"unique_clients"`
+	RebookingRate     float64 `json:"rebooking_rate"`
+	TotalHoursWorked  float64 `json:"total_hours_worked"`
+	RevenuePerHour    float64 `json:"revenue_per_hour"`
 }
 
 func (a *App) StaffPerformance(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,8 @@ func (a *App) StaffPerformance(w http.ResponseWriter, r *http.Request) {
 		SELECT sp.id,
 		       CONCAT(u.first_name,' ',u.last_name) as name,
 		       u.email,
-		       COUNT(DISTINCT a.id) as appointment_count,
+		       u.role,
+		       COUNT(DISTINCT a.id) as total_appointments,
 		       COALESCE(SUM(aps.price * aps.duration_min / 60.0), 0) as revenue_estimate,
 		       COALESCE(SUM(aps.price), 0) as total_revenue,
 		       COALESCE(AVG(aps.price), 0) as avg_ticket,
@@ -54,7 +56,7 @@ func (a *App) StaffPerformance(w http.ResponseWriter, r *http.Request) {
 		  AND a.start_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
 		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
 		WHERE sp.salon_id = ?
-		GROUP BY sp.id, u.first_name, u.last_name, u.email`,
+		GROUP BY sp.id, u.first_name, u.last_name, u.email, u.role`,
 		period, sid)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
@@ -66,9 +68,9 @@ func (a *App) StaffPerformance(w http.ResponseWriter, r *http.Request) {
 	var staffList []*staffPerfRow
 	for rows.Next() {
 		var s staffPerfRow
-		rows.Scan(&s.ID, &s.Name, &s.Email, &s.AppointmentCount,
+		rows.Scan(&s.ID, &s.Name, &s.Email, &s.Role, &s.TotalAppointments,
 			&s.RevenueEstimate, &s.TotalRevenue, &s.AvgTicket, &s.UniqueClients)
-		s.TotalHoursWorked = float64(s.AppointmentCount) * 1.0 // avg 60-min appointment
+		s.TotalHoursWorked = float64(s.TotalAppointments) * 1.0 // avg 60-min appointment
 		s.RevenuePerHour = s.TotalRevenue / math.Max(s.TotalHoursWorked, 1)
 		staffMap[s.ID] = &s
 		staffList = append(staffList, &s)
@@ -131,7 +133,7 @@ func (a *App) AppointmentRiskScores(w http.ResponseWriter, r *http.Request) {
 		JOIN staff_profiles sp ON sp.id = a.staff_id
 		JOIN users u ON u.id = sp.user_id
 		WHERE a.salon_id=?
-		  AND a.status IN ('scheduled','confirmed')
+		  AND a.status IN ('pending','confirmed')
 		  AND a.start_at BETWEEN ? AND ?
 		ORDER BY a.start_at ASC`,
 		sid, now, sevenDaysLater)

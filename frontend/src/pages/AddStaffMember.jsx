@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Camera, ChevronDown, X, Search, MapPin, Check, ChevronUp } from 'lucide-react'
 import api from '@/lib/api'
@@ -28,6 +28,8 @@ const RELATIONSHIPS = ['Partner','Spouse','Parent','Sibling','Child','Friend','O
 export default function AddStaffMember() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { id } = useParams()
+  const isEdit = Boolean(id)
   const [activeSection, setActiveSection] = useState('Profile')
 
   // ── Form state ──────────────────────────────────────────
@@ -40,8 +42,32 @@ export default function AddStaffMember() {
     start_year: String(new Date().getFullYear()),
     end_date: '', end_year: '', employment_type: '', team_member_id: '', notes: '',
     allow_calendar_bookings: true, permission_role: 'medium',
+    commission_pct: 0,
   })
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
+
+  // ── Prefill in edit mode ─────────────────────────────────
+  const { data: existing } = useQuery({
+    queryKey: ['staff', id],
+    queryFn: () => api.get(`/staff/${id}`).then(r => r.data),
+    enabled: isEdit,
+  })
+  useEffect(() => {
+    if (!existing) return
+    setForm(f => ({
+      ...f,
+      first_name: existing.first_name || '',
+      last_name:  existing.last_name  || '',
+      email:      existing.email      || '',
+      phone:      existing.phone      || '',
+      specializations: existing.specializations || '',
+      calendar_color:  existing.color || CALENDAR_COLORS[0],
+      notes:           existing.bio   || '',
+      allow_calendar_bookings: existing.accepts_online ?? true,
+      permission_role: existing.role || 'medium',
+      commission_pct: existing.commission_pct ?? 0,
+    }))
+  }, [existing])
 
   // ── Addresses ────────────────────────────────────────────
   const [addresses, setAddresses] = useState([])
@@ -89,18 +115,54 @@ export default function AddStaffMember() {
   function isSvcChecked(id) { return allSelected || selectedSvcs.has(id) }
 
   // ── Save ─────────────────────────────────────────────────
+  const payload = () => ({
+    first_name: form.first_name,
+    last_name:  form.last_name,
+    email:      form.email,
+    phone:      form.phone ? `${form.phone_country} ${form.phone}` : '',
+    specializations: form.specializations,
+    color:           form.calendar_color,
+    bio:             form.notes,
+    role:            form.permission_role,
+    accepts_online:  form.allow_calendar_bookings,
+    commission_pct:  parseFloat(form.commission_pct) || 0,
+  })
   const mutation = useMutation({
-    mutationFn: () => api.post('/staff', {
-      first_name: form.first_name, last_name: form.last_name,
-      email: form.email,
-      phone: form.phone ? `${form.phone_country} ${form.phone}` : '',
-      specializations: form.specializations,
-      color: form.calendar_color,
-      bio: form.notes,
-      role: form.permission_role,
-      accepts_online: form.allow_calendar_bookings,
-    }),
+    mutationFn: () => isEdit
+      ? api.put(`/staff/${id}`, payload())
+      : api.post('/staff', payload()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['staff'] }); navigate('/admin/staff') },
+  })
+
+  // ── Per-service commission overrides ──────────────────────
+  const { data: commissionOverrides = [] } = useQuery({
+    queryKey: ['staff-commissions', id],
+    queryFn: () => api.get(`/staff/${id}/commissions`).then(r => r.data),
+    enabled: isEdit,
+  })
+  const [overrides, setOverrides] = useState({}) // { [service_id]: '12.5' }
+  useEffect(() => {
+    const next = {}
+    commissionOverrides.forEach(o => { next[o.service_id] = String(o.commission_pct) })
+    setOverrides(next)
+  }, [commissionOverrides])
+
+  // Services this staff member can actually perform (per staff_services
+  // assignment managed on the Services page) — a service with no assignment
+  // restriction is open to everyone.
+  const eligibleServices = services.filter(s => !s.staff_ids?.length || s.staff_ids.includes(+id))
+
+  const commissionMutation = useMutation({
+    mutationFn: () => {
+      const body = Object.entries(overrides)
+        .filter(([, pct]) => pct !== '' && pct != null)
+        .map(([service_id, pct]) => ({ service_id: +service_id, commission_pct: parseFloat(pct) }))
+      return Promise.all([
+        api.put(`/staff/${id}`, payload()),
+        api.put(`/staff/${id}/commissions`, body),
+      ])
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['staff-commissions', id] }),
   })
 
   const canSave = form.first_name.trim() && form.email.trim()
@@ -112,7 +174,7 @@ export default function AddStaffMember() {
     <div className="-m-6 min-h-screen bg-white flex flex-col">
       {/* Top bar */}
       <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100 shrink-0">
-        <h1 className="text-[20px] font-bold text-slate-900">Add team member</h1>
+        <h1 className="text-[20px] font-bold text-slate-900">{isEdit ? 'Edit team member' : 'Add team member'}</h1>
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/admin/staff')}
             className="px-5 py-2 rounded-full border border-slate-300 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
@@ -120,7 +182,7 @@ export default function AddStaffMember() {
           </button>
           <button onClick={() => mutation.mutate()} disabled={!canSave || mutation.isPending}
             className="px-5 py-2 rounded-full text-white text-[13px] font-bold bg-slate-900 hover:bg-slate-700 disabled:opacity-50 transition-colors">
-            {mutation.isPending ? 'Adding…' : 'Add'}
+            {mutation.isPending ? (isEdit ? 'Saving…' : 'Adding…') : (isEdit ? 'Save' : 'Add')}
           </button>
         </div>
       </div>
@@ -464,8 +526,82 @@ export default function AddStaffMember() {
             </div>
           )}
 
+          {/* ── COMMISSIONS ─────────────────────────────────── */}
+          {activeSection === 'Commissions' && (
+            isEdit ? (
+              <div>
+                <div className="mb-6">
+                  <h2 className="text-[22px] font-bold text-slate-900">Commissions</h2>
+                  <p className="text-[14px] text-slate-400 mt-1">Set a default rate, then override it for specific services if needed</p>
+                </div>
+
+                <div className="mb-8 p-4 rounded-xl border border-slate-200 max-w-xs">
+                  <label className="block text-[12px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Default commission rate</label>
+                  <div className="relative">
+                    <input
+                      type="number" min="0" max="100" step="0.5"
+                      value={form.commission_pct}
+                      onChange={e => set('commission_pct', e.target.value)}
+                      className={inp + ' pr-8'}
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-slate-400">%</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5">Applied to every service unless overridden below.</p>
+                </div>
+
+                <h3 className="text-[14px] font-bold text-slate-800 mb-2">Per-service overrides</h3>
+                {eligibleServices.length === 0 ? (
+                  <p className="text-[13px] text-slate-400 py-4">This team member isn't assigned any services yet.</p>
+                ) : (
+                  <div className="divide-y divide-slate-50 border-t border-slate-100">
+                    {eligibleServices.map(svc => (
+                      <div key={svc.id} className="flex items-center justify-between py-3.5">
+                        <div>
+                          <p className="text-[13px] font-medium text-slate-800">{svc.name}</p>
+                          <p className="text-[12px] text-slate-400">{svc.category || 'Other'}</p>
+                        </div>
+                        <div className="relative w-28">
+                          <input
+                            type="number" min="0" max="100" step="0.5"
+                            value={overrides[svc.id] ?? ''}
+                            onChange={e => setOverrides(o => ({ ...o, [svc.id]: e.target.value }))}
+                            placeholder={`${form.commission_pct || 0}`}
+                            className={inp + ' pr-8 py-2 text-right'}
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-slate-400">%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-6 flex items-center gap-3">
+                  <button
+                    onClick={() => commissionMutation.mutate()}
+                    disabled={commissionMutation.isPending}
+                    className="px-5 py-2.5 rounded-full text-white text-[13px] font-bold bg-slate-900 hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                  >
+                    {commissionMutation.isPending ? 'Saving…' : 'Save commissions'}
+                  </button>
+                  {commissionMutation.isSuccess && <span className="text-[12px] text-emerald-600 font-semibold">Saved</span>}
+                  {commissionMutation.isError && <span className="text-[12px] text-red-500 font-semibold">Failed to save</span>}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                  <span className="text-[22px]">💰</span>
+                </div>
+                <p className="text-[16px] font-bold text-slate-700">Commissions</p>
+                <p className="text-[13px] text-slate-400 mt-1 max-w-xs">
+                  Commission settings will be available once the team member is created.
+                </p>
+              </div>
+            )
+          )}
+
           {/* ── PAY STUBS ───────────────────────────────────── */}
-          {['Wages and timesheets','Commissions','Pay runs'].includes(activeSection) && (
+          {['Wages and timesheets','Pay runs'].includes(activeSection) && (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
                 <span className="text-[22px]">💰</span>

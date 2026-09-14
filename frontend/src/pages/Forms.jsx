@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   FileText, Plus, Trash2, Edit2, Eye, X, Check,
   ChevronUp, ChevronDown, AlignLeft, Square, Calendar,
-  PenLine, ClipboardList, ToggleLeft, ToggleRight
+  PenLine, ClipboardList, ToggleLeft, ToggleRight, Link, Copy
 } from 'lucide-react'
+import api from '@/lib/api'
 
 const FIELD_TYPES = [
   { key: 'text',      label: 'Text' },
@@ -13,50 +15,80 @@ const FIELD_TYPES = [
   { key: 'signature', label: 'Signature' },
 ]
 
-export default function Forms() {
-  const [tab, setTab] = useState('Forms')
-  const [forms, setForms] = useState(() => JSON.parse(localStorage.getItem('ks_forms') || '[]'))
-  useEffect(() => { localStorage.setItem('ks_forms', JSON.stringify(forms)) }, [forms])
+function fmt(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 
+export default function Forms() {
+  const qc = useQueryClient()
+  const [tab, setTab] = useState('Forms')
   const [showBuilder, setShowBuilder] = useState(false)
   const [editingForm, setEditingForm] = useState(null)
   const [previewForm, setPreviewForm] = useState(null)
+  const [responsesForm, setResponsesForm] = useState(null)
   const [toast, setToast] = useState(null)
-  useEffect(() => {
-    if (toast) {
-      const t = setTimeout(() => setToast(null), 2000)
-      return () => clearTimeout(t)
-    }
-  }, [toast])
+
+  const showToast = (text, type = 'success') => {
+    setToast({ text, type })
+    setTimeout(() => setToast(null), 2500)
+  }
 
   const [builderName, setBuilderName] = useState('')
   const [builderFields, setBuilderFields] = useState([])
 
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: forms = [], isLoading } = useQuery({
+    queryKey: ['forms'],
+    queryFn: () => api.get('/forms').then(r => r.data),
+  })
+
+  const { data: responses = [], isLoading: responsesLoading } = useQuery({
+    queryKey: ['form-responses', responsesForm?.id],
+    queryFn: () => api.get(`/forms/${responsesForm.id}/responses`).then(r => r.data),
+    enabled: !!responsesForm,
+  })
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const createMut = useMutation({
+    mutationFn: d => api.post('/forms', d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['forms'] }); showToast('Form created.') },
+    onError: () => showToast('Failed to create form.', 'error'),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, d }) => api.put(`/forms/${id}`, d),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['forms'] }); showToast('Form updated.') },
+    onError: () => showToast('Failed to update form.', 'error'),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: id => api.delete(`/forms/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['forms'] }); showToast('Form deleted.') },
+    onError: () => showToast('Failed to delete form.', 'error'),
+  })
+
+  // ── Builder helpers ───────────────────────────────────────────────────────
   function openNewBuilder() {
-    setShowBuilder(true)
-    setEditingForm(null)
-    setBuilderName('')
-    setBuilderFields([])
+    setShowBuilder(true); setEditingForm(null)
+    setBuilderName(''); setBuilderFields([])
   }
 
   function openEditBuilder(f) {
-    setShowBuilder(true)
-    setEditingForm(f)
+    setShowBuilder(true); setEditingForm(f)
     setBuilderName(f.name)
-    setBuilderFields([...f.fields])
+    setBuilderFields(Array.isArray(f.fields) ? [...f.fields] : JSON.parse(f.fields || '[]'))
   }
 
   function closeBuilder() {
-    setShowBuilder(false)
-    setEditingForm(null)
-    setBuilderName('')
-    setBuilderFields([])
+    setShowBuilder(false); setEditingForm(null)
+    setBuilderName(''); setBuilderFields([])
   }
 
   function addField(type) {
     setBuilderFields(prev => [
       ...prev,
-      { id: prev.length + forms.length + 10 + Date.now(), label: '', type, required: false }
+      { id: `f_${Date.now()}`, label: '', type, required: false }
     ])
   }
 
@@ -80,38 +112,27 @@ export default function Forms() {
 
   function saveForm() {
     if (!builderName.trim() || builderFields.length === 0) {
-      setToast({ type: 'error', text: 'Add a name and at least one field.' })
+      showToast('Add a name and at least one field.', 'error')
       return
     }
+    const payload = { name: builderName.trim(), fields: builderFields }
     if (editingForm) {
-      setForms(prev => prev.map(f =>
-        f.id === editingForm.id
-          ? { ...f, name: builderName.trim(), fields: builderFields }
-          : f
-      ))
-      setToast({ type: 'success', text: 'Form updated.' })
+      updateMut.mutate({ id: editingForm.id, d: payload }, { onSuccess: closeBuilder })
     } else {
-      setForms(prev => [
-        ...prev,
-        {
-          id: forms.length + 1,
-          name: builderName.trim(),
-          fields: builderFields,
-          createdAt: 'Jun 14, 2026',
-          responseCount: 0,
-        },
-      ])
-      setToast({ type: 'success', text: 'Form created.' })
+      createMut.mutate(payload, { onSuccess: closeBuilder })
     }
-    closeBuilder()
   }
 
-  function deleteForm(id) {
-    setForms(prev => prev.filter(f => f.id !== id))
-    setToast({ type: 'success', text: 'Form deleted.' })
+  function copyLink(formId) {
+    const url = `https://store.kriyanshbeautybar.com/forms/${formId}`
+    navigator.clipboard.writeText(url).then(() => showToast('Link copied!'))
   }
 
-  const responses = JSON.parse(localStorage.getItem('ks_form_responses') || '[]')
+  // ── Responses count helper ────────────────────────────────────────────────
+  function openResponses(form) {
+    setResponsesForm(form)
+    setTab('Responses')
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -170,7 +191,9 @@ export default function Forms() {
             </button>
           </div>
 
-          {forms.length === 0 ? (
+          {isLoading ? (
+            <div className="flex justify-center py-20 text-slate-400 text-[14px]">Loading…</div>
+          ) : forms.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <FileText size={52} className="text-slate-300 mb-4" />
               <p className="text-[17px] font-bold text-slate-700 mb-1">No forms yet</p>
@@ -186,40 +209,57 @@ export default function Forms() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {forms.map(form => (
-                <div key={form.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-                  <p className="text-[16px] font-bold text-slate-800">{form.name}</p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-semibold text-[#0D9488] bg-teal-50 px-2.5 py-1 rounded-full">
-                      {form.fields.length} fields
-                    </span>
-                    <span className="text-[11px] text-slate-400">Created {form.createdAt}</span>
+              {forms.map(form => {
+                const fields = Array.isArray(form.fields) ? form.fields : (JSON.parse(form.fields || '[]'))
+                return (
+                  <div key={form.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
+                    <p className="text-[16px] font-bold text-slate-800">{form.name}</p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] font-semibold text-[#0D9488] bg-teal-50 px-2.5 py-1 rounded-full">
+                        {fields.length} fields
+                      </span>
+                      <span className="text-[11px] text-slate-400">Created {fmt(form.created_at)}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        onClick={() => setPreviewForm({ ...form, fields })}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-slate-50 transition-colors"
+                      >
+                        <Eye size={13} />
+                        Preview
+                      </button>
+                      <button
+                        onClick={() => openEditBuilder({ ...form, fields })}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-slate-50 transition-colors"
+                      >
+                        <Edit2 size={13} />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => openResponses(form)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-slate-50 transition-colors"
+                      >
+                        <ClipboardList size={13} />
+                        Responses
+                      </button>
+                      <button
+                        onClick={() => copyLink(form.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-teal-50 hover:text-teal-600 hover:border-teal-200 transition-colors"
+                      >
+                        <Copy size={13} />
+                        Copy link
+                      </button>
+                      <button
+                        onClick={() => deleteMut.mutate(form.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-[12px] font-medium hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors ml-auto"
+                      >
+                        <Trash2 size={13} />
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      onClick={() => setPreviewForm(form)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-slate-50 transition-colors"
-                    >
-                      <Eye size={13} />
-                      Preview
-                    </button>
-                    <button
-                      onClick={() => openEditBuilder(form)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-[12px] font-medium hover:bg-slate-50 transition-colors"
-                    >
-                      <Edit2 size={13} />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => deleteForm(form.id)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 text-[12px] font-medium hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors ml-auto"
-                    >
-                      <Trash2 size={13} />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -228,28 +268,56 @@ export default function Forms() {
       {/* Responses Tab */}
       {tab === 'Responses' && (
         <div>
-          {responses.length === 0 ? (
+          {/* Form selector */}
+          <div className="flex items-center gap-3 mb-5">
+            <select
+              value={responsesForm?.id ?? ''}
+              onChange={e => {
+                const f = forms.find(f => String(f.id) === e.target.value)
+                setResponsesForm(f || null)
+              }}
+              className="px-3 py-2 rounded-xl border border-slate-200 text-[13px] text-slate-700 outline-none focus:border-[#0D9488] bg-white"
+            >
+              <option value="">— Select a form —</option>
+              {forms.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </div>
+
+          {!responsesForm ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <ClipboardList size={52} className="text-slate-300 mb-4" />
+              <p className="text-[17px] font-bold text-slate-700 mb-1">Select a form</p>
+              <p className="text-slate-400 text-[14px]">Choose a form above to see its submissions.</p>
+            </div>
+          ) : responsesLoading ? (
+            <div className="flex justify-center py-20 text-slate-400 text-[14px]">Loading…</div>
+          ) : responses.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <ClipboardList size={52} className="text-slate-300 mb-4" />
               <p className="text-[17px] font-bold text-slate-700 mb-1">No responses yet</p>
-              <p className="text-slate-400 text-[14px]">Responses will appear here once clients submit intake forms.</p>
+              <p className="text-slate-400 text-[14px]">Responses will appear here once clients submit this form.</p>
             </div>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 text-[13px] text-slate-500">
+                {responses.length} submission{responses.length !== 1 ? 's' : ''} for <span className="font-semibold text-slate-700">{responsesForm.name}</span>
+              </div>
               <table className="w-full text-[13px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="text-left px-5 py-3 font-semibold text-slate-500">Date</th>
-                    <th className="text-left px-5 py-3 font-semibold text-slate-500">Client</th>
-                    <th className="text-left px-5 py-3 font-semibold text-slate-500">Form</th>
+                    <th className="text-left px-5 py-3 font-semibold text-slate-500">Client ID</th>
+                    <th className="text-left px-5 py-3 font-semibold text-slate-500">Responses</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {responses.map((r, i) => (
-                    <tr key={i} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 text-slate-600">{r.date}</td>
-                      <td className="px-5 py-3 text-slate-800 font-medium">{r.client}</td>
-                      <td className="px-5 py-3 text-slate-600">{r.form}</td>
+                  {responses.map(r => (
+                    <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{fmt(r.submitted_at)}</td>
+                      <td className="px-5 py-3 text-slate-600">{r.client_id ?? 'Anonymous'}</td>
+                      <td className="px-5 py-3 text-slate-500 text-[12px] max-w-xs truncate">
+                        {typeof r.responses === 'string' ? r.responses : JSON.stringify(r.responses)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -262,25 +330,17 @@ export default function Forms() {
       {/* Form Builder Slide-over */}
       {showBuilder && (
         <>
-          <div
-            className="fixed inset-0 bg-black/30 z-40"
-            onClick={closeBuilder}
-          />
+          <div className="fixed inset-0 bg-black/30 z-40" onClick={closeBuilder} />
           <div className="fixed top-0 right-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col">
-            {/* Builder Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <h2 className="text-[16px] font-bold text-slate-800">
                 {editingForm ? `Edit: ${editingForm.name}` : 'New Form'}
               </h2>
-              <button
-                onClick={closeBuilder}
-                className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
+              <button onClick={closeBuilder} className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                 <X size={18} />
               </button>
             </div>
 
-            {/* Builder Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <input
                 type="text"
@@ -296,18 +356,10 @@ export default function Forms() {
                 {builderFields.map((field, idx) => (
                   <div key={field.id} className="flex items-center gap-2">
                     <div className="flex flex-col gap-0.5">
-                      <button
-                        onClick={() => moveField(idx, -1)}
-                        disabled={idx === 0}
-                        className={`p-0.5 rounded text-slate-400 hover:text-slate-700 transition-colors ${idx === 0 ? 'opacity-30' : ''}`}
-                      >
+                      <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className={`p-0.5 rounded text-slate-400 hover:text-slate-700 transition-colors ${idx === 0 ? 'opacity-30' : ''}`}>
                         <ChevronUp size={14} />
                       </button>
-                      <button
-                        onClick={() => moveField(idx, 1)}
-                        disabled={idx === builderFields.length - 1}
-                        className={`p-0.5 rounded text-slate-400 hover:text-slate-700 transition-colors ${idx === builderFields.length - 1 ? 'opacity-30' : ''}`}
-                      >
+                      <button onClick={() => moveField(idx, 1)} disabled={idx === builderFields.length - 1} className={`p-0.5 rounded text-slate-400 hover:text-slate-700 transition-colors ${idx === builderFields.length - 1 ? 'opacity-30' : ''}`}>
                         <ChevronDown size={14} />
                       </button>
                     </div>
@@ -323,23 +375,15 @@ export default function Forms() {
                       onChange={e => updateField(idx, 'type', e.target.value)}
                       className="px-2 py-2 rounded-lg border border-slate-200 text-[12px] text-slate-600 outline-none focus:border-[#0D9488] bg-slate-50 cursor-pointer"
                     >
-                      {FIELD_TYPES.map(t => (
-                        <option key={t.key} value={t.key}>{t.label}</option>
-                      ))}
+                      {FIELD_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
                     </select>
-                    <button
-                      onClick={() => updateField(idx, 'required', !field.required)}
-                      className="transition-colors"
-                    >
+                    <button onClick={() => updateField(idx, 'required', !field.required)} className="transition-colors">
                       {field.required
                         ? <ToggleRight size={22} className="text-[#0D9488]" />
                         : <ToggleLeft size={22} className="text-slate-400" />
                       }
                     </button>
-                    <button
-                      onClick={() => removeField(idx)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    >
+                    <button onClick={() => removeField(idx)} className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
                       <X size={14} />
                     </button>
                   </div>
@@ -362,20 +406,17 @@ export default function Forms() {
               </div>
             </div>
 
-            {/* Builder Footer */}
             <div className="p-4 border-t border-slate-100 flex gap-3">
-              <button
-                onClick={closeBuilder}
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-[14px] font-semibold hover:bg-slate-50 transition-colors"
-              >
+              <button onClick={closeBuilder} className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-[14px] font-semibold hover:bg-slate-50 transition-colors">
                 Cancel
               </button>
               <button
                 onClick={saveForm}
-                className="flex-1 px-4 py-2.5 rounded-xl text-white text-[14px] font-semibold"
+                disabled={createMut.isPending || updateMut.isPending}
+                className="flex-1 px-4 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60"
                 style={{ background: 'linear-gradient(135deg,#0D9488 0%,#6366F1 100%)' }}
               >
-                Save Form
+                {(createMut.isPending || updateMut.isPending) ? 'Saving…' : 'Save Form'}
               </button>
             </div>
           </div>
@@ -388,10 +429,7 @@ export default function Forms() {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-[17px] font-bold text-slate-800">{previewForm.name}</h2>
-              <button
-                onClick={() => setPreviewForm(null)}
-                className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
+              <button onClick={() => setPreviewForm(null)} className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                 <X size={18} />
               </button>
             </div>
@@ -403,20 +441,10 @@ export default function Forms() {
                     {field.required && <span className="text-red-500 ml-1">*</span>}
                   </label>
                   {field.type === 'text' && (
-                    <input
-                      type="text"
-                      disabled
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400"
-                      placeholder="Short text…"
-                    />
+                    <input type="text" disabled className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400" placeholder="Short text…" />
                   )}
                   {field.type === 'longtext' && (
-                    <textarea
-                      disabled
-                      rows={3}
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400 resize-none"
-                      placeholder="Long text…"
-                    />
+                    <textarea disabled rows={3} className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400 resize-none" placeholder="Long text…" />
                   )}
                   {field.type === 'checkbox' && (
                     <div className="flex items-center gap-2">
@@ -425,11 +453,7 @@ export default function Forms() {
                     </div>
                   )}
                   {field.type === 'date' && (
-                    <input
-                      type="date"
-                      disabled
-                      className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400"
-                    />
+                    <input type="date" disabled className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-400" />
                   )}
                   {field.type === 'signature' && (
                     <div className="w-full h-20 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center">

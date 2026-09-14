@@ -9,14 +9,35 @@ import (
 	"salonos/internal/models"
 )
 
+const clientSelectCols = `id, salon_id, first_name, last_name,
+	COALESCE(email,''), COALESCE(phone,''), COALESCE(gender,''),
+	COALESCE(notes,''), loyalty_points, total_visits,
+	total_spend, sms_consent, is_active, last_visit_at, created_at,
+	fresha_id, marketing_consent, telephone,
+	address_line1, address_line2, address_area,
+	address_city, address_state, address_postcode,
+	staff_alert, tags, avatar_url,
+	date_of_birth, anniversary, preferences`
+
+func scanClient(rows interface {
+	Scan(...any) error
+}, c *models.Client) error {
+	return rows.Scan(&c.ID, &c.SalonID, &c.FirstName, &c.LastName,
+		&c.Email, &c.Phone, &c.Gender, &c.Notes,
+		&c.LoyaltyPoints, &c.TotalVisits, &c.TotalSpend,
+		&c.SMSConsent, &c.IsActive, &c.LastVisitAt, &c.CreatedAt,
+		&c.FreshaID, &c.MarketingConsent, &c.Telephone,
+		&c.AddressLine1, &c.AddressLine2, &c.AddressArea,
+		&c.AddressCity, &c.AddressState, &c.AddressPostcode,
+		&c.StaffAlert, &c.Tags, &c.AvatarURL,
+		&c.DateOfBirth, &c.Anniversary, &c.Preferences)
+}
+
 func (a *App) ListClients(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
 	q := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id, salon_id, first_name, last_name,
-		        COALESCE(email,''), COALESCE(phone,''), COALESCE(gender,''),
-		        COALESCE(notes,''), loyalty_points, total_visits,
-		        total_spend, sms_consent, is_active, last_visit_at, created_at
+		`SELECT `+clientSelectCols+`
 		 FROM clients
 		 WHERE salon_id=? AND is_active=1
 		   AND (first_name LIKE ? OR last_name LIKE ? OR phone LIKE ? OR email LIKE ?)
@@ -29,10 +50,7 @@ func (a *App) ListClients(w http.ResponseWriter, r *http.Request) {
 	var clients []models.Client
 	for rows.Next() {
 		var c models.Client
-		rows.Scan(&c.ID, &c.SalonID, &c.FirstName, &c.LastName,
-			&c.Email, &c.Phone, &c.Gender, &c.Notes,
-			&c.LoyaltyPoints, &c.TotalVisits, &c.TotalSpend,
-			&c.SMSConsent, &c.IsActive, &c.LastVisitAt, &c.CreatedAt)
+		scanClient(rows, &c)
 		clients = append(clients, c)
 	}
 	if clients == nil {
@@ -49,16 +67,9 @@ func (a *App) GetClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c models.Client
-	err = a.DB.QueryRowContext(r.Context(),
-		`SELECT id, salon_id, first_name, last_name,
-		        COALESCE(email,''), COALESCE(phone,''), COALESCE(gender,''),
-		        COALESCE(notes,''), loyalty_points, total_visits,
-		        total_spend, sms_consent, is_active, last_visit_at, created_at
-		 FROM clients WHERE id=? AND salon_id=?`, id, claims.SalonID).
-		Scan(&c.ID, &c.SalonID, &c.FirstName, &c.LastName,
-			&c.Email, &c.Phone, &c.Gender, &c.Notes,
-			&c.LoyaltyPoints, &c.TotalVisits, &c.TotalSpend,
-			&c.SMSConsent, &c.IsActive, &c.LastVisitAt, &c.CreatedAt)
+	err = scanClient(a.DB.QueryRowContext(r.Context(),
+		`SELECT `+clientSelectCols+` FROM clients WHERE id=? AND salon_id=?`,
+		id, claims.SalonID), &c)
 	if err == sql.ErrNoRows {
 		a.Error(w, http.StatusNotFound, "client not found")
 		return
@@ -79,9 +90,14 @@ func (a *App) CreateClient(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SalonID = claims.SalonID
 	res, err := a.DB.ExecContext(r.Context(),
-		`INSERT INTO clients (salon_id, first_name, last_name, email, phone, gender, notes, sms_consent)
-		 VALUES (?,?,?,?,?,?,?,?)`,
-		c.SalonID, c.FirstName, c.LastName, c.Email, c.Phone, c.Gender, c.Notes, c.SMSConsent)
+		`INSERT INTO clients
+		  (salon_id, first_name, last_name, email, phone, gender, notes, sms_consent,
+		   marketing_consent, telephone, address_line1, address_line2, address_area,
+		   address_city, address_state, address_postcode, staff_alert, tags)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		c.SalonID, c.FirstName, c.LastName, c.Email, c.Phone, c.Gender, c.Notes, c.SMSConsent,
+		c.MarketingConsent, c.Telephone, c.AddressLine1, c.AddressLine2, c.AddressArea,
+		c.AddressCity, c.AddressState, c.AddressPostcode, c.StaffAlert, c.Tags)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
@@ -331,15 +347,25 @@ func (a *App) UpdateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = a.DB.ExecContext(r.Context(),
-		`UPDATE clients SET first_name=?, last_name=?, email=?, phone=?,
-		 gender=?, notes=?, sms_consent=? WHERE id=? AND salon_id=?`,
+		`UPDATE clients SET
+		  first_name=?, last_name=?, email=?, phone=?,
+		  gender=?, notes=?, sms_consent=?, marketing_consent=?,
+		  staff_alert=?, tags=?,
+		  date_of_birth=?, anniversary=?, preferences=?
+		 WHERE id=? AND salon_id=?`,
 		c.FirstName, c.LastName, c.Email, c.Phone,
-		c.Gender, c.Notes, c.SMSConsent, id, claims.SalonID)
+		c.Gender, c.Notes, c.SMSConsent, c.MarketingConsent,
+		c.StaffAlert, c.Tags,
+		c.DateOfBirth, c.Anniversary, c.Preferences,
+		id, claims.SalonID)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	c.ID = uint(id)
-	c.SalonID = claims.SalonID
-	a.JSON(w, http.StatusOK, c)
+	// Return fresh data
+	var updated models.Client
+	_ = scanClient(a.DB.QueryRowContext(r.Context(),
+		`SELECT `+clientSelectCols+` FROM clients WHERE id=? AND salon_id=?`,
+		id, claims.SalonID), &updated)
+	a.JSON(w, http.StatusOK, updated)
 }

@@ -58,7 +58,13 @@ func (a *App) PublicCurrentAppointment(w http.ResponseWriter, r *http.Request) {
 
 	err := a.DB.QueryRowContext(r.Context(), `
 		SELECT ap.id, ap.start_at, ap.status,
-		       COALESCE(s.name, ''),
+		       COALESCE(
+		         (SELECT GROUP_CONCAT(sv.name ORDER BY aps.id SEPARATOR ', ')
+		          FROM appointment_services aps
+		          JOIN services sv ON sv.id = aps.service_id
+		          WHERE aps.appointment_id = ap.id),
+		         ''
+		       ),
 		       CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,'')),
 		       COALESCE(sp.id, 0),
 		       CONCAT(c.first_name, ' ', c.last_name),
@@ -66,13 +72,12 @@ func (a *App) PublicCurrentAppointment(w http.ResponseWriter, r *http.Request) {
 		       ap.recurring_frequency
 		FROM appointments ap
 		JOIN clients c ON c.id = ap.client_id AND c.salon_id = ap.salon_id
-		LEFT JOIN services s ON s.id = ap.service_id
 		LEFT JOIN staff_profiles sp ON sp.id = ap.staff_id
 		LEFT JOIN users u ON u.id = sp.user_id
 		WHERE c.phone = ?
 		  AND ap.salon_id = ?
 		  AND DATE(ap.start_at) = CURDATE()
-		  AND ap.status IN ('checked_in','in_progress','completed')
+		  AND ap.status IN ('checked_in','in_service','completed')
 		  AND ap.recurring_frequency IS NOT NULL
 		  AND ap.recurring_frequency != ''
 		  AND COALESCE(ap.recurring_confirmed, 0) = 0
@@ -118,11 +123,10 @@ func (a *App) PublicBookNext(w http.ResponseWriter, r *http.Request) {
 	var startAt time.Time
 	var recurringFrequency, clientPhone, clientFirstName, staffName string
 	var clientID, staffProfileID, salonID uint
-	var serviceID sql.NullInt64
 
 	err = a.DB.QueryRowContext(r.Context(), `
 		SELECT ap.start_at, ap.recurring_frequency,
-		       ap.client_id, ap.staff_id, ap.salon_id, ap.service_id,
+		       ap.client_id, ap.staff_id, ap.salon_id,
 		       c.phone, c.first_name,
 		       COALESCE(CONCAT(u.first_name,' ',u.last_name), 'any stylist')
 		FROM appointments ap
@@ -130,7 +134,7 @@ func (a *App) PublicBookNext(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN staff_profiles sp ON sp.id = ap.staff_id
 		LEFT JOIN users u ON u.id = sp.user_id
 		WHERE ap.id = ?`, apptID).
-		Scan(&startAt, &recurringFrequency, &clientID, &staffProfileID, &salonID, &serviceID,
+		Scan(&startAt, &recurringFrequency, &clientID, &staffProfileID, &salonID,
 			&clientPhone, &clientFirstName, &staffName)
 	if err == sql.ErrNoRows {
 		a.Error(w, http.StatusNotFound, "appointment not found")
@@ -159,16 +163,6 @@ func (a *App) PublicBookNext(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Fallback to single service_id on the appointment row
-	if len(services) == 0 && serviceID.Valid {
-		var price float64
-		var dur int
-		_ = a.DB.QueryRowContext(r.Context(),
-			`SELECT price, duration_min FROM services WHERE id = ?`, serviceID.Int64).
-			Scan(&price, &dur)
-		services = append(services, svcRow{int(serviceID.Int64), price, dur})
-	}
-
 	// Calculate next date (same time-of-day)
 	nextStart := nextRecurringDate(startAt, recurringFrequency)
 	totalDur := 0
@@ -184,7 +178,7 @@ func (a *App) PublicBookNext(w http.ResponseWriter, r *http.Request) {
 	res, err := a.DB.ExecContext(r.Context(),
 		`INSERT INTO appointments
 		   (salon_id, client_id, staff_id, start_at, end_at, status, notes, source, recurring_frequency)
-		 VALUES (?, ?, ?, ?, ?, 'scheduled', 'Recurring booking — deposit pending', 'recurring', ?)`,
+		 VALUES (?, ?, ?, ?, ?, 'pending', 'Recurring booking — deposit pending', 'recurring', ?)`,
 		salonID, clientID, staffProfileID, nextStart, nextEnd, recurringFrequency)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
@@ -198,12 +192,6 @@ func (a *App) PublicBookNext(w http.ResponseWriter, r *http.Request) {
 			`INSERT INTO appointment_services (appointment_id, service_id, price, duration_min)
 			 VALUES (?, ?, ?, ?)`,
 			newApptID, s.ServiceID, s.Price, s.DurationMin)
-	}
-
-	// Also set service_id on the new appointment row for compatibility
-	if len(services) > 0 {
-		a.DB.ExecContext(r.Context(),
-			`UPDATE appointments SET service_id = ? WHERE id = ?`, services[0].ServiceID, newApptID)
 	}
 
 	// Mark the original appointment as recurring_confirmed

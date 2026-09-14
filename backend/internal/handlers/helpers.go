@@ -9,11 +9,14 @@ import (
 )
 
 type App struct {
-	DB        *sql.DB
-	Secret    string
-	Notifier  *notify.Notifier
-	AppURL    string
-	StripeKey string
+	DB             *sql.DB
+	Secret         string
+	Notifier       *notify.Notifier
+	AppURL         string
+	StripeKey      string
+	OpenAIKey      string
+	ReplicateToken string
+	UploadDir      string // root dir for uploaded files, e.g. "./uploads"
 }
 
 func (a *App) JSON(w http.ResponseWriter, status int, v any) {

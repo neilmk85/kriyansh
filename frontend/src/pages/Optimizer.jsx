@@ -30,15 +30,37 @@ const inp = 'w-full px-3 py-2 rounded-xl border border-slate-200 text-[13px] out
 // ─── Promotion modal ───────────────────────────────────────────────────────────
 function PromoModal({ gap, onClose }) {
   const [form, setForm] = useState({ discount: '20', duration: '1 week', message: '' })
-  const [sent, setSent]   = useState(false)
+  // status: 'idle' | 'sending' | 'success' | 'error'
+  const [status, setStatus] = useState('idle')
+  const [errorMsg, setErrorMsg] = useState('')
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const defaultMsg = `Special offer: ${form.discount}% off on ${gap?.day} at ${gap?.time || (gap?.hour + ':00')}! Book now.`
+  const slotTime = gap?.time || `${gap?.hour}:00`
+  const defaultMsg = `Special offer: ${form.discount}% off on ${gap?.day} at ${slotTime}! Book now.`
 
-  function handleSend() {
-    setSent(true)
-    setTimeout(() => { onClose(); setSent(false) }, 1500)
+  async function handleSend() {
+    setStatus('sending')
+    setErrorMsg('')
+    const campaignName = `Flash Promo – ${gap?.day} ${slotTime}`
+    const message = form.message.trim() || defaultMsg
+    try {
+      const res = await api.post('/marketing/campaigns', {
+        name: campaignName,
+        message,
+        segment: 'all',
+        channel: 'sms',
+      })
+      await api.post(`/marketing/campaigns/${res.data.id}/send`)
+      setStatus('success')
+      setTimeout(() => { onClose() }, 1500)
+    } catch (err) {
+      setStatus('error')
+      setErrorMsg(err?.response?.data?.error || 'Failed to send campaign. Please try again.')
+    }
   }
+
+  const sending = status === 'sending'
+  const success = status === 'success'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -54,7 +76,7 @@ function PromoModal({ gap, onClose }) {
         </div>
 
         <p className="text-[12px] text-slate-500 mb-4">
-          Slot: <span className="font-semibold text-slate-700">{gap?.day} at {gap?.time || `${gap?.hour}:00`}</span>
+          Slot: <span className="font-semibold text-slate-700">{gap?.day} at {slotTime}</span>
           {gap?.utilization !== undefined && (
             <span className="ml-1 text-orange-500">({Math.round((gap.utilization || 0) * 100)}% utilization)</span>
           )}
@@ -86,16 +108,22 @@ function PromoModal({ gap, onClose }) {
           </div>
         </div>
 
+        {status === 'error' && (
+          <p className="text-[12px] bg-red-50 text-red-600 border border-red-200 px-3 py-2 rounded-xl font-medium mt-3">
+            {errorMsg}
+          </p>
+        )}
+
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-[13px] font-semibold hover:bg-slate-50">
             Cancel
           </button>
           <button
             onClick={handleSend}
-            disabled={sent}
-            className="flex-1 py-2.5 rounded-xl text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] text-[13px] font-semibold  disabled:opacity-60 transition-colors"
+            disabled={sending || success}
+            className="flex-1 py-2.5 rounded-xl text-white bg-gradient-to-r from-[#0D9488] to-[#6366F1] text-[13px] font-semibold disabled:opacity-60 transition-colors"
           >
-            {sent ? 'Scheduled!' : 'Create Promotion'}
+            {success ? 'Campaign sent!' : sending ? 'Sending…' : 'Create Promotion'}
           </button>
         </div>
       </div>

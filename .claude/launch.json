@@ -19,7 +19,7 @@
       "name": "mobile-web",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["expo", "start", "--web", "--port", "8082"],
-      "cwd": "/Users/nilesh/development/kriyansh/mobile",
+      "cwd": "/Users/nilesh/development/kriyansh/mobile_owner",
       "port": 8082
     }
   ]

@@ -1,9 +1,28 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"net/http"
+	"strings"
 	"time"
 )
+
+const giftCardCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no ambiguous chars (I,O,0,1)
+
+func randomGiftCardCode() (string, error) {
+	var b strings.Builder
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	for i, v := range buf {
+		if i > 0 && i%4 == 0 {
+			b.WriteByte('-')
+		}
+		b.WriteByte(giftCardCodeAlphabet[int(v)%len(giftCardCodeAlphabet)])
+	}
+	return b.String(), nil
+}
 
 type giftCard struct {
 	ID              int       `json:"id"`
@@ -78,6 +97,84 @@ func (a *App) IssueGiftCard(w http.ResponseWriter, r *http.Request) {
 		&card.ID, &card.Code, &card.InitialAmount, &card.RedeemedAmount, &card.Balance,
 		&card.Status, &card.RecipientName, &card.RecipientEmail, &card.SenderName, &card.Message, &card.IssuedAt)
 	a.JSON(w, http.StatusCreated, card)
+}
+
+// PublicCreateGiftCard lets a customer request a gift card from the public site.
+// It is created as 'pending_payment' — not redeemable — until staff confirms
+// payment was collected and activates it. This avoids issuing free, spendable
+// balance to anonymous requests.
+func (a *App) PublicCreateGiftCard(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Amount         float64 `json:"amount"`
+		RecipientName  string  `json:"recipient_name"`
+		RecipientEmail string  `json:"recipient_email"`
+		SenderName     string  `json:"sender_name"`
+		Message        string  `json:"message"`
+	}
+	if err := a.Decode(r, &body); err != nil || body.Amount < 10 || body.Amount > 1000 {
+		a.Error(w, http.StatusBadRequest, "amount must be between $10 and $1000")
+		return
+	}
+
+	var salonID uint
+	if err := a.DB.QueryRowContext(r.Context(), `SELECT id FROM salons ORDER BY id LIMIT 1`).Scan(&salonID); err != nil {
+		a.Error(w, http.StatusInternalServerError, "no salon configured")
+		return
+	}
+
+	var id int64
+	var code string
+	for attempt := 0; attempt < 5; attempt++ {
+		c, err := randomGiftCardCode()
+		if err != nil {
+			a.Error(w, http.StatusInternalServerError, "code generation failed")
+			return
+		}
+		res, err := a.DB.ExecContext(r.Context(), `
+			INSERT INTO gift_cards
+			  (salon_id, code, initial_amount, status, recipient_name, recipient_email, sender_name, message)
+			VALUES (?, ?, ?, 'pending_payment', ?, ?, ?, ?)`,
+			salonID, c, body.Amount, body.RecipientName, body.RecipientEmail, body.SenderName, body.Message)
+		if err == nil {
+			id, _ = res.LastInsertId()
+			code = c
+			break
+		}
+	}
+	if code == "" {
+		a.Error(w, http.StatusInternalServerError, "could not generate a unique code, please try again")
+		return
+	}
+
+	a.JSON(w, http.StatusCreated, map[string]any{
+		"id":     id,
+		"code":   code,
+		"status": "pending_payment",
+	})
+}
+
+// ActivateGiftCard (staff) confirms payment was collected for a pending gift
+// card and makes it redeemable.
+func (a *App) ActivateGiftCard(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	id, err := pathID(r, "id")
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE gift_cards SET status='active' WHERE id=? AND salon_id=? AND status='pending_payment'`,
+		id, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		a.Error(w, http.StatusNotFound, "gift card not found or not pending payment")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]any{"activated": true})
 }
 
 // ValidateGiftCard checks a code and returns its balance (no auth — used by customer and POS).

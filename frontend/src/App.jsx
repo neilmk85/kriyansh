@@ -41,9 +41,16 @@ import CustomerReview from '@/pages/CustomerReview'
 import Reports from '@/pages/Reports'
 import Purchases from '@/pages/Purchases'
 import NewPurchaseOrder from '@/pages/NewPurchaseOrder'
+import Suppliers from '@/pages/Suppliers'
+import Resources from '@/pages/Resources'
+import Stocktakes from '@/pages/Stocktakes'
 import Kiosk from '@/pages/Kiosk'
+import StaffKiosk from '@/pages/StaffKiosk'
 import WalkInQueue from '@/pages/WalkInQueue'
 import TVDisplay from '@/pages/TVDisplay'
+import OnlineReputation from '@/pages/OnlineReputation'
+import AppointmentsList from '@/pages/AppointmentsList'
+import NewCampaign from '@/pages/NewCampaign'
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -83,6 +90,7 @@ export default function App() {
             <Route path="/gift"          element={<CustomerGiftCard />} />
             <Route path="/review/:token" element={<CustomerReview />} />
             <Route path="/kiosk"         element={<Kiosk />} />
+            <Route path="/staff-kiosk"   element={<StaffKiosk />} />
             <Route path="/tv"            element={<TVDisplay />} />
             <Route path="/booking"                    element={<BookingPage />} />
             <Route path="/checkin/:appointmentId"     element={<CheckIn />} />
@@ -93,15 +101,18 @@ export default function App() {
             }>
               <Route index element={<Dashboard />} />
               <Route path="appointments" element={<Appointments />} />
+              <Route path="appointments/list" element={<AppointmentsList />} />
               <Route path="queue"        element={<WalkInQueue />} />
               <Route path="clients"          element={<Clients />} />
               <Route path="clients/segments" element={<ClientSegments />} />
               <Route path="services"     element={<Services />} />
               <Route path="staff"            element={<Staff />} />
               <Route path="staff/add"        element={<AddStaffMember />} />
+              <Route path="staff/:id/edit"  element={<AddStaffMember />} />
               <Route path="staff/shifts"     element={<StaffShifts />} />
               <Route path="staff/timesheets" element={<StaffTimesheets />} />
               <Route path="staff/payrun"     element={<StaffPayrun />} />
+              <Route path="resources"        element={<Resources />} />
               <Route path="loyalty"      element={<Loyalty />} />
               <Route path="inventory"    element={<Inventory />} />
               <Route path="memberships"       element={<Memberships />} />
@@ -111,12 +122,16 @@ export default function App() {
               <Route path="gift-cards"  element={<GiftCards />} />
               <Route path="products"    element={<Products />} />
               <Route path="marketing"         element={<Marketing />} />
+              <Route path="marketing/new"    element={<NewCampaign />} />
               <Route path="staff-performance" element={<StaffPerformance />} />
               <Route path="optimizer"         element={<Optimizer />} />
               <Route path="forms"            element={<Forms />} />
               <Route path="reports"      element={<Reports />} />
               <Route path="purchases"           element={<Purchases />} />
               <Route path="purchases/new-order" element={<NewPurchaseOrder />} />
+              <Route path="suppliers"   element={<Suppliers />} />
+              <Route path="stocktakes"  element={<Stocktakes />} />
+              <Route path="reputation"  element={<OnlineReputation />} />
               <Route path="pos"          element={<POS />} />
               <Route path="settings"     element={<Settings />} />
             </Route>

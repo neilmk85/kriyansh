@@ -874,17 +874,17 @@ export default function CustomerProfile() {
 
   const { data: profileData } = useQuery({
     queryKey: ['customer-profile'],
-    queryFn: () => axios.get('/api/customer/profile', { headers: customerHeaders() }).then(r => r.data),
+    queryFn: () => axios.get('/api/v1/customer/profile', { headers: customerHeaders() }).then(r => r.data),
     enabled: !!storedClient,
   })
   const { data: appointmentsData = [] } = useQuery({
     queryKey: ['customer-appointments'],
-    queryFn: () => axios.get('/api/customer/appointments', { headers: customerHeaders() }).then(r => r.data),
+    queryFn: () => axios.get('/api/v1/customer/appointments', { headers: customerHeaders() }).then(r => r.data),
     enabled: !!storedClient,
   })
   const { data: loyaltyData = {} } = useQuery({
     queryKey: ['customer-loyalty'],
-    queryFn: () => axios.get('/api/customer/loyalty', { headers: customerHeaders() }).then(r => r.data),
+    queryFn: () => axios.get('/api/v1/customer/loyalty', { headers: customerHeaders() }).then(r => r.data),
     enabled: !!storedClient,
   })
 

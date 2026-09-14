@@ -359,6 +359,13 @@ func (a *App) GetClientPackages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-expire packages whose expiry date has passed
+	a.DB.ExecContext(r.Context(),
+		`UPDATE client_packages SET status='expired'
+		 WHERE client_id=? AND salon_id=? AND status='active'
+		   AND expires_at IS NOT NULL AND expires_at < NOW()`,
+		clientID, claims.SalonID)
+
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT cp.id as client_package_id, cp.package_id, p.name as package_name,
 		       cp.status, cp.purchased_at, cp.expires_at, cp.purchase_price,

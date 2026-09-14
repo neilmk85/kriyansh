@@ -361,24 +361,54 @@ func (a *App) CustomerMembership(w http.ResponseWriter, r *http.Request) {
 		Color           string  `json:"color"`
 	}
 
+	// Auto-expire overdue memberships
+	a.DB.ExecContext(r.Context(),
+		`UPDATE client_memberships SET status='cancelled'
+		 WHERE client_id=? AND salon_id=? AND status='active' AND expires_at IS NOT NULL AND expires_at < CURDATE()`,
+		cc.ClientID, cc.SalonID)
+
+	var expiresAt string
 	err := a.DB.QueryRowContext(r.Context(), `
 		SELECT cm.id, mp.name, COALESCE(mp.description,''), mp.price,
 		       COALESCE(mp.billing_cycle,'monthly'), COALESCE(mp.service_discount_pct,0),
 		       cm.status, COALESCE(DATE_FORMAT(cm.start_date,'%Y-%m-%d'),''),
 		       COALESCE(DATE_FORMAT(cm.next_billing_date,'%Y-%m-%d'),''),
-		       COALESCE(mp.color,'#0D9488')
+		       COALESCE(mp.color,'#0D9488'),
+		       COALESCE(DATE_FORMAT(cm.expires_at,'%Y-%m-%d'), DATE_FORMAT(cm.next_billing_date,'%Y-%m-%d'), '')
 		FROM client_memberships cm
 		JOIN membership_plans mp ON mp.id=cm.plan_id
 		WHERE cm.client_id=? AND cm.salon_id=? AND cm.status='active' LIMIT 1`,
 		cc.ClientID, cc.SalonID).
 		Scan(&m.ID, &m.Name, &m.Description, &m.Price, &m.BillingCycle,
-			&m.DiscountPct, &m.Status, &m.StartDate, &m.NextBillingDate, &m.Color)
+			&m.DiscountPct, &m.Status, &m.StartDate, &m.NextBillingDate, &m.Color, &expiresAt)
 	if err != nil {
 		// No active membership — return null
 		a.JSON(w, http.StatusOK, nil)
 		return
 	}
-	a.JSON(w, http.StatusOK, m)
+
+	// Compute days_left
+	daysLeft := -1
+	if expiresAt != "" {
+		if exp, parseErr := time.Parse("2006-01-02", expiresAt); parseErr == nil {
+			daysLeft = int(time.Until(exp).Hours() / 24)
+		}
+	}
+
+	a.JSON(w, http.StatusOK, map[string]any{
+		"id":               m.ID,
+		"name":             m.Name,
+		"description":      m.Description,
+		"price":            m.Price,
+		"billing_cycle":    m.BillingCycle,
+		"discount_pct":     m.DiscountPct,
+		"status":           m.Status,
+		"start_date":       m.StartDate,
+		"next_billing_date": m.NextBillingDate,
+		"color":            m.Color,
+		"expires_at":       expiresAt,
+		"days_left":        daysLeft,
+	})
 }
 
 // GET /api/customer/transactions

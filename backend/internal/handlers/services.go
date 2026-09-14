@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"salonos/internal/auth"
 	"salonos/internal/middleware"
@@ -62,7 +64,11 @@ func (a *App) ListServices(w http.ResponseWriter, r *http.Request) {
 		`SELECT s.id, s.salon_id, s.category_id, s.name,
 		        COALESCE(s.description,''), s.duration_min, s.price,
 		        COALESCE(s.price_type,'fixed'), s.deposit_amt,
-		        COALESCE(s.gender,'any'), s.is_active
+		        COALESCE(s.gender,'any'), s.is_active,
+		        COALESCE(
+		          (SELECT GROUP_CONCAT(ss.staff_id) FROM staff_services ss WHERE ss.service_id = s.id),
+		          ''
+		        )
 		 FROM services s WHERE s.salon_id=? ORDER BY s.name`, claims.SalonID)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
@@ -72,14 +78,44 @@ func (a *App) ListServices(w http.ResponseWriter, r *http.Request) {
 	var svcs []models.Service
 	for rows.Next() {
 		var s models.Service
+		var staffIDsCSV string
 		rows.Scan(&s.ID, &s.SalonID, &s.CategoryID, &s.Name, &s.Description,
-			&s.DurationMin, &s.Price, &s.PriceType, &s.DepositAmt, &s.Gender, &s.IsActive)
+			&s.DurationMin, &s.Price, &s.PriceType, &s.DepositAmt, &s.Gender, &s.IsActive, &staffIDsCSV)
+		s.StaffIDs = parseUintCSV(staffIDsCSV)
 		svcs = append(svcs, s)
 	}
 	if svcs == nil {
 		svcs = []models.Service{}
 	}
 	a.JSON(w, http.StatusOK, svcs)
+}
+
+// parseUintCSV parses a comma-separated list of ids from GROUP_CONCAT, e.g. "1,4,7".
+func parseUintCSV(csv string) []uint {
+	ids := []uint{}
+	if csv == "" {
+		return ids
+	}
+	for _, part := range strings.Split(csv, ",") {
+		if n, err := strconv.ParseUint(part, 10, 64); err == nil {
+			ids = append(ids, uint(n))
+		}
+	}
+	return ids
+}
+
+// syncServiceStaff replaces the set of staff allowed to perform a service.
+func (a *App) syncServiceStaff(ctx context.Context, serviceID uint64, staffIDs []uint) error {
+	if _, err := a.DB.ExecContext(ctx, `DELETE FROM staff_services WHERE service_id=?`, serviceID); err != nil {
+		return err
+	}
+	for _, staffID := range staffIDs {
+		if _, err := a.DB.ExecContext(ctx,
+			`INSERT INTO staff_services (staff_id, service_id) VALUES (?,?)`, staffID, serviceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) CreateService(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +140,10 @@ func (a *App) CreateService(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	s.ID = uint(id)
 	s.IsActive = true
+	if err := a.syncServiceStaff(r.Context(), uint64(id), s.StaffIDs); err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
 	a.JSON(w, http.StatusCreated, s)
 }
 
@@ -134,6 +174,10 @@ func (a *App) UpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ID = uint(id)
 	s.SalonID = claims.SalonID
+	if err := a.syncServiceStaff(r.Context(), id, s.StaffIDs); err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
 	a.JSON(w, http.StatusOK, s)
 }
 

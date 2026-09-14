@@ -28,6 +28,10 @@ type Config struct {
 
 	// Stripe
 	StripeKey string
+
+	// AI Try-On
+	OpenAIKey      string
+	ReplicateToken string
 }
 
 func Load() *Config {
@@ -51,6 +55,9 @@ func Load() *Config {
 
 		AppURL:    getEnv("APP_URL", "http://localhost:5173"),
 		StripeKey: getEnv("STRIPE_SECRET_KEY", ""),
+
+		OpenAIKey:      getEnv("OPENAI_API_KEY", ""),
+		ReplicateToken: getEnv("REPLICATE_API_TOKEN", ""),
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -168,6 +169,35 @@ func (a *App) ListReviewResponses(w http.ResponseWriter, r *http.Request) {
 	a.JSON(w, http.StatusOK, items)
 }
 
+// RespondToReview PUT /api/reviews/{id}/respond  (auth required)
+// Saves or updates the owner's public response to a review.
+func (a *App) RespondToReview(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	reviewID := r.PathValue("id")
+
+	var req struct {
+		Response string `json:"response"`
+	}
+	if err := a.Decode(r, &req); err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE review_responses SET owner_response = ? WHERE id = ? AND salon_id = ?`,
+		req.Response, reviewID, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		a.Error(w, http.StatusNotFound, "review not found")
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // ── Background worker ─────────────────────────────────────────────────────────
 
 // ScheduleReviewRequest inserts a pending review_request row after a transaction.
@@ -268,6 +298,84 @@ func (a *App) dispatchDueReviews(appURL string) {
 		_, _ = a.DB.Exec(
 			`UPDATE review_requests SET status=?, sent_at=NOW() WHERE id=?`, status, p.id)
 	}
+}
+
+// ── Admin: Online Reputation dashboard ───────────────────────────────────────
+
+// GetOnlineReputation GET /api/reputation
+// Returns aggregated review stats + per-review list for the salon.
+func (a *App) GetOnlineReputation(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+
+	// review_responses has salon_id directly — use it for all queries
+	var avgRating float64
+	var total int
+	_ = a.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(AVG(rating),0), COUNT(*)
+		 FROM review_responses
+		 WHERE salon_id = ? AND is_public = 1`, sid).
+		Scan(&avgRating, &total)
+
+	distRows, err := a.DB.QueryContext(ctx,
+		`SELECT rating, COUNT(*) as cnt
+		 FROM review_responses
+		 WHERE salon_id = ? AND is_public = 1
+		 GROUP BY rating`, sid)
+	dist := map[string]int{"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+	if err == nil {
+		defer distRows.Close()
+		for distRows.Next() {
+			var star, cnt int
+			if distRows.Scan(&star, &cnt) == nil {
+				dist[fmt.Sprintf("%d", star)] = cnt
+			}
+		}
+	}
+
+	type reviewRow struct {
+		ID            int    `json:"id"`
+		ClientName    string `json:"client_name"`
+		Rating        int    `json:"rating"`
+		Comment       string `json:"comment"`
+		CreatedAt     string `json:"created_at"`
+		Service       string `json:"service"`
+		OwnerResponse string `json:"owner_response"`
+	}
+
+	rows, err := a.DB.QueryContext(ctx,
+		`SELECT rr.id,
+		        CONCAT(c.first_name, ' ', LEFT(c.last_name,1), '.') AS client_name,
+		        rr.rating,
+		        COALESCE(rr.comment,''),
+		        DATE_FORMAT(rr.created_at,'%Y-%m-%d'),
+		        '',
+		        COALESCE(rr.owner_response,'')
+		 FROM review_responses rr
+		 JOIN clients c ON c.id = rr.client_id
+		 WHERE rr.salon_id = ? AND rr.is_public = 1
+		 ORDER BY rr.created_at DESC`, sid)
+	var reviews []reviewRow
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var rv reviewRow
+			if rows.Scan(&rv.ID, &rv.ClientName, &rv.Rating, &rv.Comment, &rv.CreatedAt, &rv.Service, &rv.OwnerResponse) == nil {
+				reviews = append(reviews, rv)
+			}
+		}
+	}
+	if reviews == nil {
+		reviews = []reviewRow{}
+	}
+
+	a.JSON(w, http.StatusOK, map[string]any{
+		"avg_rating":    avgRating,
+		"total_reviews": total,
+		"distribution":  dist,
+		"reviews":       reviews,
+	})
 }
 
 func generateToken() (string, error) {

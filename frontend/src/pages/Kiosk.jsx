@@ -558,6 +558,20 @@ function FamilyStep({ familyMembers, setFamilyMembers, onNext, onBack, submittin
     setFamilyMembers((prev) => prev.filter((_, idx) => idx !== i))
   }
 
+  // If the user typed a name into the "add family member" form but never tapped
+  // Add, fold it in on submit instead of silently dropping that person. Passed
+  // directly to onNext (not via setFamilyMembers first) since that state update
+  // wouldn't be visible to the parent's submit handler until after this render.
+  function handleContinue() {
+    if (adding && newFirst.trim()) {
+      onNext({ first: newFirst.trim(), last: newLast.trim(), serviceIds: [] })
+    } else {
+      onNext()
+    }
+  }
+
+  const pendingCount = familyMembers.length + (adding && newFirst.trim() ? 1 : 0)
+
   return (
     <div className="min-h-screen flex flex-col" style={DARK_BG}>
       <div
@@ -668,7 +682,7 @@ function FamilyStep({ familyMembers, setFamilyMembers, onNext, onBack, submittin
         )}
 
         <button
-          onClick={onNext}
+          onClick={handleContinue}
           disabled={submitting}
           className="w-full py-5 rounded-2xl text-white text-xl font-semibold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
           style={{
@@ -681,8 +695,8 @@ function FamilyStep({ familyMembers, setFamilyMembers, onNext, onBack, submittin
         >
           {submitting
             ? 'Checking in…'
-            : familyMembers.length > 0
-            ? `Check In Everyone (${familyMembers.length + 1})`
+            : pendingCount > 0
+            ? `Check In Everyone (${pendingCount + 1})`
             : 'Check In'}
           {!submitting && <ArrowRight size={22} />}
         </button>
@@ -887,7 +901,7 @@ function ServicesStep({ services, selectedIds, setSelectedIds, onNext, onSkip, o
 
 // ─── Step: Staff ──────────────────────────────────────────────────────────────
 
-function StaffStep({ staff, selectedStaffId, setSelectedStaffId, onNext, onBack, submitting }) {
+function StaffStep({ staff, selectedStaffId, setSelectedStaffId, onNext, onBack }) {
   return (
     <div className="min-h-screen flex flex-col" style={DARK_BG}>
       <div
@@ -1019,16 +1033,14 @@ function StaffStep({ staff, selectedStaffId, setSelectedStaffId, onNext, onBack,
           </button>
           <button
             onClick={onNext}
-            disabled={submitting}
             className="flex-1 py-5 rounded-2xl text-white text-xl font-semibold transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2"
             style={{
               ...PRIMARY_BTN,
-              opacity: submitting ? 0.6 : 1,
               boxShadow: '0 0 28px rgba(13,148,136,0.4)',
               minHeight: 72,
             }}
           >
-            {submitting ? 'Checking in…' : <>Check In <ArrowRight size={20} /></>}
+            Next <ArrowRight size={20} />
           </button>
         </div>
       </div>
@@ -1038,9 +1050,37 @@ function StaffStep({ staff, selectedStaffId, setSelectedStaffId, onNext, onBack,
 
 // ─── Step: Done ───────────────────────────────────────────────────────────────
 
-function DoneStep({ checkedInName, onReset }) {
-  const [countdown, setCountdown] = useState(8)
+function DoneStep({ checkedInName, queueId, onReset }) {
+  const [countdown, setCountdown] = useState(20)
+  const [queueInfo, setQueueInfo] = useState(null) // { position, waitMinutes, status }
 
+  const firstName = checkedInName?.split(' ')[0] || checkedInName
+
+  // Poll /api/public/queue every 20s to get live position + wait time
+  useEffect(() => {
+    async function fetchQueue() {
+      try {
+        const res = await fetch('/api/v1/public/queue')
+        if (!res.ok) return
+        const entries = await res.json()
+        if (!Array.isArray(entries) || !queueId) return
+        const idx = entries.findIndex(e => e.id === queueId)
+        if (idx !== -1) {
+          setQueueInfo({
+            position: idx + 1,
+            total: entries.filter(e => e.status === 'waiting').length,
+            waitMinutes: entries[idx].wait_minutes,
+            status: entries[idx].status,
+          })
+        }
+      } catch { /* silently ignore */ }
+    }
+    fetchQueue()
+    const poll = setInterval(fetchQueue, 20_000)
+    return () => clearInterval(poll)
+  }, [queueId])
+
+  // Countdown to auto-reset
   useEffect(() => {
     const t = setInterval(() => {
       setCountdown((c) => {
@@ -1051,7 +1091,11 @@ function DoneStep({ checkedInName, onReset }) {
     return () => clearInterval(t)
   }, [onReset])
 
-  const firstName = checkedInName?.split(' ')[0] || checkedInName
+  const waitLabel = queueInfo
+    ? queueInfo.status === 'in_service'
+      ? 'You\'re with a stylist now'
+      : `~${Math.max(5, queueInfo.waitMinutes)} min wait · Position #${queueInfo.position}`
+    : 'Checking your position…'
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center" style={DARK_BG}>
@@ -1094,15 +1138,21 @@ function DoneStep({ checkedInName, onReset }) {
       </p>
 
       <div
-        className="rounded-2xl px-8 py-4 mb-12 flex items-center gap-3"
+        className="rounded-2xl px-8 py-4 mb-4 flex items-center gap-3"
         style={{
           background: 'rgba(16,185,129,0.1)',
           border: '1px solid rgba(16,185,129,0.25)',
         }}
       >
         <Clock size={20} style={{ color: '#34D399' }} />
-        <p className="text-xl" style={{ color: '#34D399' }}>Estimated wait: ~10–15 min</p>
+        <p className="text-xl" style={{ color: '#34D399' }}>{waitLabel}</p>
       </div>
+
+      {queueInfo && queueInfo.total > 1 && queueInfo.status === 'waiting' && (
+        <p className="text-base mb-8" style={MUTED}>
+          {queueInfo.total - 1} {queueInfo.total - 1 === 1 ? 'person' : 'people'} ahead of you
+        </p>
+      )}
 
       <p className="text-base" style={MUTED}>
         Returning to home in {countdown}…
@@ -1566,6 +1616,7 @@ export default function Kiosk() {
   const [selectedStaffId, setSelectedStaffId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [checkedInName, setCheckedInName] = useState('')
+  const [checkedInQueueId, setCheckedInQueueId] = useState(null)
   const [lookupLoading, setLookupLoading] = useState(false)
   const [appointments, setAppointments] = useState([])
   const [apptLoading, setApptLoading] = useState(false)
@@ -1582,7 +1633,7 @@ export default function Kiosk() {
   const fetchServices = useCallback(async () => {
     if (services.length > 0) return
     try {
-      const res = await fetch('/api/public/services')
+      const res = await fetch('/api/v1/public/services')
       if (res.ok) setServices(await res.json())
     } catch (e) {
       console.error('Failed to load services', e)
@@ -1593,7 +1644,7 @@ export default function Kiosk() {
   const fetchStaff = useCallback(async () => {
     if (staff.length > 0) return
     try {
-      const res = await fetch('/api/public/staff')
+      const res = await fetch('/api/v1/public/staff')
       if (res.ok) setStaff(await res.json())
     } catch (e) {
       console.error('Failed to load staff', e)
@@ -1717,7 +1768,9 @@ export default function Kiosk() {
     try {
       const res = await fetch(`/api/public/appointments/${appt.id}/checkin`, { method: 'POST' })
       if (res.ok) {
+        const data = await res.json().catch(() => ({}))
         setCheckedInName(appt.client_name || '')
+        setCheckedInQueueId(data.queue_id ?? null)
         setStep('done')
       } else {
         alert('Check-in failed. Please see the front desk.')
@@ -1728,14 +1781,15 @@ export default function Kiosk() {
   }
 
   // Submit check-in (primary + family members)
-  const handleSubmit = async () => {
+  const handleSubmit = async (pendingMember) => {
     setSubmitting(true)
     const fullName =
       lookup?.found
         ? `${lookup.first_name} ${lookup.last_name}`.trim()
         : `${name.first} ${name.last}`.trim()
+    const allMembers = pendingMember ? [...familyMembers, pendingMember] : familyMembers
     try {
-      const res = await fetch('/api/public/walkin', {
+      const res = await fetch('/api/v1/public/walkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1749,11 +1803,12 @@ export default function Kiosk() {
       if (res.ok) {
         const data = await res.json()
         setCheckedInName(data.name || fullName)
+        setCheckedInQueueId(data.id ?? null)
         // Post each family member as a separate queue entry
-        for (const member of familyMembers) {
+        for (const member of allMembers) {
           const memberName = `${member.first} ${member.last}`.trim()
           if (!memberName) continue
-          await fetch('/api/public/walkin', {
+          await fetch('/api/v1/public/walkin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1786,6 +1841,7 @@ export default function Kiosk() {
     setSelectedServiceIds([])
     setSelectedStaffId(null)
     setCheckedInName('')
+    setCheckedInQueueId(null)
     setSubmitting(false)
     setAppointments([])
     setLookupLoading(false)
@@ -1821,7 +1877,7 @@ export default function Kiosk() {
         setPhone={setPhone}
         loading={checkoutLoading}
         onNext={handleCheckoutPhoneNext}
-        onBack={() => { setPhone(''); setStep('welcome') }}
+        onBack={handleReset}
         subtitle="We'll find your appointment"
       />
     )
@@ -1843,7 +1899,7 @@ export default function Kiosk() {
             We couldn't find a completed appointment with a recurring booking for this number today.
           </p>
           <button
-            onClick={() => { setPhone(''); setStep('welcome') }}
+            onClick={handleReset}
             className="py-4 px-10 rounded-2xl text-white text-xl font-semibold"
             style={{ ...PRIMARY_BTN, boxShadow: '0 0 28px rgba(13,148,136,0.4)' }}
           >
@@ -1857,7 +1913,7 @@ export default function Kiosk() {
         appt={checkoutAppt}
         loading={bookingNext}
         onConfirm={handleBookNext}
-        onSkip={() => { setPhone(''); setStep('welcome') }}
+        onSkip={handleReset}
         onBack={() => setStep('checkout-phone')}
       />
     )
@@ -1938,7 +1994,7 @@ export default function Kiosk() {
         setPhone={setPhone}
         loading={lookupLoading || apptLoading}
         onNext={handlePhoneNext}
-        onBack={() => setStep('welcome')}
+        onBack={handleReset}
         subtitle={mode === 'appointment' ? "We'll find your booking" : "We'll look up your profile"}
       />
     )
@@ -1991,7 +2047,6 @@ export default function Kiosk() {
         setSelectedStaffId={setSelectedStaffId}
         onNext={() => setStep('family')}
         onBack={() => setStep('services')}
-        submitting={false}
       />
     )
   }
@@ -2009,7 +2064,7 @@ export default function Kiosk() {
   }
 
   if (step === 'done') {
-    return <DoneStep checkedInName={checkedInName} onReset={handleReset} />
+    return <DoneStep checkedInName={checkedInName} queueId={checkedInQueueId} onReset={handleReset} />
   }
 
   return null

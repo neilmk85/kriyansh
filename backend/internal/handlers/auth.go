@@ -44,7 +44,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		FROM users WHERE email = ? AND is_active = 1 LIMIT 1`, req.Email).
 		Scan(&u.ID, &u.SalonID, &u.FirstName, &u.LastName, &u.Email, &u.Role, &hash)
 	if err == sql.ErrNoRows {
-		a.Error(w, http.StatusUnauthorized, "invalid credentials")
+		a.Error(w, http.StatusUnauthorized, "No account found with that email address")
 		return
 	}
 	if err != nil {
@@ -53,7 +53,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
-		a.Error(w, http.StatusUnauthorized, "invalid credentials")
+		a.Error(w, http.StatusUnauthorized, "Incorrect password")
 		return
 	}
 

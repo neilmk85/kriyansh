@@ -61,7 +61,7 @@ export default function CustomerAuth() {
         // environment works without manual DB seeding.
         const phone = inputMode === 'phone' ? form.phone : ''
         const email = inputMode === 'email' ? form.email : ''
-        let res = await fetch('/api/customer/auth/login', {
+        let res = await fetch('/api/v1/customer/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone, email, password: form.password }),
@@ -69,7 +69,7 @@ export default function CustomerAuth() {
         let data = await res.json()
         if (!res.ok) {
           // Account not seeded — auto-register with demo details
-          res = await fetch('/api/customer/auth/register', {
+          res = await fetch('/api/v1/customer/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -88,7 +88,7 @@ export default function CustomerAuth() {
 
       // Signup flow
       const body = { first_name: form.firstName, last_name: form.lastName, email: form.email, phone: form.phone, password: form.password }
-      const res = await fetch('/api/customer/auth/register', {
+      const res = await fetch('/api/v1/customer/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

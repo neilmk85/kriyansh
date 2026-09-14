@@ -174,12 +174,12 @@ export default function CustomerLanding() {
 
   const { data: categories = [] } = useQuery({
     queryKey: ['public-categories'],
-    queryFn: () => axios.get('/api/public/categories').then(r => r.data),
+    queryFn: () => axios.get('/api/v1/public/categories').then(r => r.data),
     staleTime: 5 * 60 * 1000,
   })
   const { data: allServices = [] } = useQuery({
     queryKey: ['public-services'],
-    queryFn: () => axios.get('/api/public/services').then(r => r.data),
+    queryFn: () => axios.get('/api/v1/public/services').then(r => r.data),
     staleTime: 5 * 60 * 1000,
   })
 

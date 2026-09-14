@@ -5,7 +5,7 @@ import {
   UserCog, Receipt, Menu, X, LogOut, ChevronRight, Settings2,
   Gift, Package, BadgeCheck, Megaphone, BarChart2, Zap,
   MessageCircle, Send, Layers, ChevronDown, ShoppingBag, PieChart, FileText, Clock,
-  ShoppingCart, MonitorSmartphone
+  ShoppingCart, MonitorSmartphone, ClipboardList, Truck, Star
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { cn, initials } from '@/lib/utils'
@@ -24,6 +24,7 @@ const NAV = [
       { to: '/admin/clients',          icon: Users,    label: 'Clients list'    },
       { to: '/admin/clients/segments', icon: PieChart, label: 'Client segments' },
       { to: '/admin/loyalty',          icon: Gift,     label: 'Client loyalty'  },
+      { to: '/admin/reputation',       icon: Star,     label: 'Online Reputation' },
     ],
   },
   // ── Team ─────────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ const NAV = [
       { to: '/admin/staff/shifts',     icon: Calendar, label: 'Scheduled shifts' },
       { to: '/admin/staff/timesheets', icon: Clock,    label: 'Timesheets'       },
       { to: '/admin/staff/payrun',     icon: Receipt,  label: 'Pay runs'         },
+      { to: '/admin/resources',        icon: Layers,   label: 'Rooms & Resources' },
     ],
   },
   // ── Catalogue ────────────────────────────────────────────────────────────
@@ -49,38 +51,41 @@ const NAV = [
       { to: '/admin/products',    icon: Package,    label: 'Products'    },
     ],
   },
-  // ── Sales & Marketing ────────────────────────────────────────────────────
+  // ── Inventory ────────────────────────────────────────────────────────────
   {
-    group: 'Sales & Marketing',
-    icon: Megaphone,
+    group: 'Inventory',
+    icon: Package,
     children: [
-      { to: '/admin/marketing', icon: Megaphone, label: 'Marketing' },
+      { to: '/admin/inventory',   icon: Package,       label: 'Stock levels' },
+      { to: '/admin/stocktakes',  icon: ClipboardList, label: 'Stocktakes'   },
+      { to: '/admin/purchases',   icon: ShoppingCart,  label: 'Stock orders' },
+      { to: '/admin/suppliers',   icon: Truck,         label: 'Suppliers'    },
     ],
   },
-  // ── Operations ───────────────────────────────────────────────────────────
+  // ── Marketing ────────────────────────────────────────────────────────────
+  { to: '/admin/marketing', icon: Megaphone, label: 'Marketing' },
+  // ── Tools ────────────────────────────────────────────────────────────────
   {
-    group: 'Operations',
-    icon: BarChart2,
+    group: 'Tools',
+    icon: Zap,
     children: [
-      { to: '/admin/inventory',         icon: Package,       label: 'Inventory'   },
-      { to: '/admin/purchases',         icon: ShoppingCart,  label: 'Purchases'   },
-      { to: '/admin/staff-performance', icon: BarChart2,     label: 'Performance' },
-      { to: '/admin/optimizer',         icon: Zap,           label: 'Optimizer'   },
-      { to: '/admin/forms',             icon: FileText,      label: 'Intake Forms' },
-      { to: '/admin/reports',           icon: PieChart,      label: 'Reports'     },
+      { to: '/admin/staff-performance', icon: BarChart2, label: 'Performance'   },
+      { to: '/admin/optimizer',         icon: Zap,       label: 'Optimizer'     },
+      { to: '/admin/forms',             icon: FileText,  label: 'Intake Forms'  },
     ],
   },
   // ─────────────────────────────────────────────────────────────────────────
-  { to: '/admin/pos',      icon: Receipt,  label: 'POS / Billing' },
-  { to: '/admin/settings', icon: Settings2, label: 'Settings'     },
+  { to: '/admin/reports',  icon: PieChart,  label: 'Reports'       },
+  { to: '/admin/pos',      icon: Receipt,   label: 'POS / Billing' },
+  { to: '/admin/settings', icon: Settings2, label: 'Settings'      },
 ]
 
 const GROUP_PATHS = {
-  'Team':              ['/admin/staff', '/admin/staff/shifts', '/admin/staff/timesheets', '/admin/staff/payrun'],
-  'Clients':           ['/admin/clients', '/admin/clients/segments', '/admin/loyalty'],
-  'Catalogue':         ['/admin/services', '/admin/memberships', '/admin/packages', '/admin/gift-cards', '/admin/products'],
-  'Sales & Marketing': ['/admin/marketing'],
-  'Operations':        ['/admin/inventory', '/admin/purchases', '/admin/staff-performance', '/admin/optimizer', '/admin/forms', '/admin/reports'],
+  'Team':      ['/admin/staff', '/admin/staff/shifts', '/admin/staff/timesheets', '/admin/staff/payrun', '/admin/resources'],
+  'Clients':   ['/admin/clients', '/admin/clients/segments', '/admin/loyalty', '/admin/reputation'],
+  'Catalogue': ['/admin/services', '/admin/memberships', '/admin/packages', '/admin/gift-cards', '/admin/products'],
+  'Inventory': ['/admin/inventory', '/admin/stocktakes', '/admin/purchases', '/admin/suppliers'],
+  'Tools':     ['/admin/staff-performance', '/admin/optimizer', '/admin/forms'],
 }
 
 export default function Layout() {

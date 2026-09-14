@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search, SlidersHorizontal, ArrowUpDown, ChevronDown, ChevronUp,
-  Star, Mail, Phone, Calendar, Clock, UserMinus, Pencil,
+  Star, Mail, Phone, Calendar, Clock, UserMinus, Pencil, Trash2,
   Download, Settings2, Link2, ListOrdered, X, User, Check,
 } from 'lucide-react'
 import api from '@/lib/api'
@@ -38,6 +38,7 @@ function useOutsideClick(ref, handler) {
 
 export default function Staff() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [modalTab, setModalTab]           = useState('profile')
   const [search, setSearch]               = useState('')
@@ -50,6 +51,11 @@ export default function Staff() {
   const { data: staff = [], isLoading } = useQuery({
     queryKey: ['staff'],
     queryFn: () => api.get('/staff').then(r => r.data),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.delete(`/staff/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['staff'] }),
   })
 
   const filtered = staff.filter(s =>
@@ -215,7 +221,12 @@ export default function Staff() {
                   actionsOpen={actionsOpen === s.id}
                   onActionsToggle={() => setActionsOpen(v => v === s.id ? null : s.id)}
                   onActionsClose={() => setActionsOpen(null)}
-                  onEdit={() => openModal(s, 'profile')}
+                  onEdit={() => navigate(`/admin/staff/${s.id}/edit`)}
+                  onDelete={() => {
+                    if (window.confirm(`Remove ${s.first_name} ${s.last_name} from the team?`)) {
+                      deleteMutation.mutate(s.id)
+                    }
+                  }}
                   onViewCalendar={() => openModal(s, 'schedule')}
                   onViewSchedule={() => openModal(s, 'schedule')}
                   roleLabel={roleLabel(s.role)}
@@ -240,17 +251,18 @@ export default function Staff() {
 }
 
 // ── Team Row ──────────────────────────────────────────────────────────────────
-function TeamRow({ s, checked, onCheck, actionsOpen, onActionsToggle, onActionsClose, onEdit, onViewCalendar, onViewSchedule, roleLabel }) {
+function TeamRow({ s, checked, onCheck, actionsOpen, onActionsToggle, onActionsClose, onEdit, onDelete, onViewCalendar, onViewSchedule, roleLabel }) {
   const ref = useRef(null)
   useOutsideClick(ref, onActionsClose)
 
   const avatarBg = s.color || '#0D9488'
 
   const ACTIONS = [
-    { icon: Pencil,     label: 'Edit',                  handler: onEdit          },
-    { icon: Calendar,   label: 'View calendar',          handler: onViewCalendar  },
-    { icon: Clock,      label: 'View scheduled shifts',  handler: onViewSchedule  },
-    { icon: UserMinus,  label: 'Add time off',           handler: onActionsClose  },
+    { icon: Pencil,     label: 'Edit',                  handler: onEdit,         className: ''                              },
+    { icon: Calendar,   label: 'View calendar',          handler: onViewCalendar, className: ''                              },
+    { icon: Clock,      label: 'View scheduled shifts',  handler: onViewSchedule, className: ''                              },
+    { icon: UserMinus,  label: 'Add time off',           handler: onActionsClose, className: ''                              },
+    { icon: Trash2,     label: 'Remove from team',       handler: onDelete,       className: 'text-red-500 hover:bg-red-50'  },
   ]
 
   return (
@@ -317,11 +329,11 @@ function TeamRow({ s, checked, onCheck, actionsOpen, onActionsToggle, onActionsC
 
           {actionsOpen && (
             <div className="absolute right-0 top-full mt-1.5 w-52 bg-white rounded-2xl border border-slate-100 shadow-xl z-20 overflow-hidden py-1.5">
-              {ACTIONS.map(({ icon: Icon, label, handler }) => (
+              {ACTIONS.map(({ icon: Icon, label, handler, className: cx }) => (
                 <button key={label}
                   onClick={() => { handler(); onActionsClose() }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-slate-700 hover:bg-slate-50 transition-colors text-left">
-                  <Icon size={14} className="text-slate-400 shrink-0" /> {label}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-[13px] hover:bg-slate-50 transition-colors text-left ${cx || 'text-slate-700'}`}>
+                  <Icon size={14} className="shrink-0" /> {label}
                 </button>
               ))}
             </div>

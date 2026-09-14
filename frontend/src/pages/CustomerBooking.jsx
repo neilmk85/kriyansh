@@ -124,6 +124,7 @@ export default function CustomerBooking() {
   const [selectedSlot, setSelectedSlot] = useState(null) // "HH:MM" 24h
   const [confirmed, setConfirmed] = useState(false)
   const [bookError, setBookError] = useState('')
+  const [slotTakenDialog, setSlotTakenDialog] = useState(false)
 
   const [depositPaid, setDepositPaid] = useState(false)
   const [voucherCode, setVoucherCode] = useState('')
@@ -134,9 +135,14 @@ export default function CustomerBooking() {
   const [promoOfferChoice, setPromoOfferChoice] = useState(null) // 'free' | 'discount' | null
 
   // ── API queries ──────────────────────────────────────────────────────
+  const cartServiceIds = useMemo(() => cart.map(s => s.id).sort((a, b) => a - b), [cart])
   const { data: staffRaw = [] } = useQuery({
-    queryKey: ['public-staff'],
-    queryFn: () => axios.get('/api/public/staff').then(r => r.data),
+    queryKey: ['public-staff', cartServiceIds],
+    queryFn: () => axios.get(
+      cartServiceIds.length
+        ? `/api/public/staff?service_ids=${cartServiceIds.join(',')}`
+        : '/api/v1/public/staff'
+    ).then(r => r.data),
   })
   const staffList = useMemo(() => [
     { id: 0, name: 'Any Available', specialization: 'First available stylist', color: '#6366F1' },
@@ -145,7 +151,7 @@ export default function CustomerBooking() {
 
   const { data: servicesRaw = [] } = useQuery({
     queryKey: ['public-services'],
-    queryFn: () => axios.get('/api/public/services').then(r => r.data),
+    queryFn: () => axios.get('/api/v1/public/services').then(r => r.data),
   })
   const services = useMemo(() =>
     servicesRaw.map(s => ({ ...s, duration: s.duration_min, category: s.category_name })),
@@ -156,7 +162,10 @@ export default function CustomerBooking() {
     [services]
   )
 
-  const effectiveStaffId = selectedStaff ?? 0
+  // Fall back to "Any Available" if the selected stylist can no longer
+  // perform every service in the cart (e.g. a service was added later that
+  // they don't offer).
+  const effectiveStaffId = staffList.some(m => m.id === selectedStaff) ? selectedStaff : 0
   const dateStr = selectedDay ? toDateStr(viewYear, viewMonth, selectedDay) : ''
 
   const { data: slots = [], isFetching: slotsLoading } = useQuery({
@@ -166,9 +175,16 @@ export default function CustomerBooking() {
   })
 
   const bookMutation = useMutation({
-    mutationFn: (body) => axios.post('/api/public/appointments', body).then(r => r.data),
+    mutationFn: (body) => axios.post('/api/v1/public/appointments', body).then(r => r.data),
     onSuccess: () => { setConfirmed(true); setBookError('') },
-    onError: (err) => setBookError(err.response?.data?.error || 'Booking failed. Please try again.'),
+    onError: (err) => {
+      if (err.response?.status === 409) {
+        setSelectedSlot(null)
+        setSlotTakenDialog(true)
+      } else {
+        setBookError(err.response?.data?.error || 'Booking failed. Please try again.')
+      }
+    },
   })
 
   // ── Derived ──────────────────────────────────────────────────────────
@@ -842,6 +858,33 @@ export default function CustomerBooking() {
           </div>
         )}
       </div>
+
+      {/* ── Slot already taken dialog ─────────────────── */}
+      {slotTakenDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+            style={{ animation: 'slide-up 0.28s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div className="flex flex-col items-center px-6 pt-8 pb-6 text-center">
+              <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mb-4">
+                <span className="text-2xl">⏰</span>
+              </div>
+              <h3 className="text-[18px] font-black text-slate-900 mb-2">
+                That slot was just taken
+              </h3>
+              <p className="text-[13px] text-slate-500 mb-6 leading-relaxed">
+                Someone else booked this time slot moments before you. Please choose a different time and we'll get you sorted.
+              </p>
+              <button
+                onClick={() => setSlotTakenDialog(false)}
+                className="w-full py-3 rounded-2xl text-[14px] font-bold text-white"
+                style={{ background: 'linear-gradient(135deg,#0d9488,#6366f1)' }}>
+                Choose Another Time
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Promo offer modal ──────────────────────────── */}
       {showPromoModal && (

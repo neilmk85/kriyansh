@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Plus, Users, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Users, X, CalendarOff, Trash2 } from 'lucide-react'
 import api from '@/lib/api'
 import { initials } from '@/lib/utils'
 
@@ -194,9 +194,221 @@ function AddShiftModal({ staff, defaultDate, onClose, onSubmit, isLoading }) {
   )
 }
 
+// ── AddTimeOffModal ───────────────────────────────────────────────────────
+function AddTimeOffModal({ staff, onClose, onSubmit, isLoading }) {
+  const today = toDateStr(new Date())
+  const [form, setForm] = useState({
+    staff_id: staff[0]?.id ?? '',
+    start_date: today,
+    end_date: today,
+    reason: '',
+  })
+
+  function set(field, value) {
+    setForm(f => ({ ...f, [field]: value }))
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.staff_id || !form.start_date || !form.end_date) return
+    onSubmit({ ...form, staff_id: Number(form.staff_id) })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10 mx-4">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[17px] font-bold text-slate-900">Add time off</h2>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition-colors"
+          >
+            <X size={14} className="text-slate-500" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Team member</label>
+            <select
+              value={form.staff_id}
+              onChange={e => set('staff_id', e.target.value)}
+              className="w-full h-10 rounded-xl border border-slate-200 px-3 text-[14px] text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+              required
+            >
+              {staff.map(s => (
+                <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">Start date</label>
+              <input
+                type="date"
+                value={form.start_date}
+                onChange={e => set('start_date', e.target.value)}
+                className="w-full h-10 rounded-xl border border-slate-200 px-3 text-[14px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">End date</label>
+              <input
+                type="date"
+                value={form.end_date}
+                min={form.start_date}
+                onChange={e => set('end_date', e.target.value)}
+                className="w-full h-10 rounded-xl border border-slate-200 px-3 text-[14px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-600 mb-1.5">
+              Reason <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              value={form.reason}
+              onChange={e => set('reason', e.target.value)}
+              rows={2}
+              maxLength={255}
+              placeholder="e.g. family vacation"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-[14px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-[#0D9488]/30 focus:border-[#0D9488]"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 h-10 rounded-full border border-slate-200 text-[14px] font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="flex-1 h-10 rounded-full text-white text-[14px] font-bold bg-gradient-to-r from-[#0D9488] to-[#6366F1] hover:opacity-90 disabled:opacity-50 transition-all"
+            >
+              {isLoading ? 'Saving…' : 'Add time off'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── TimeOffSection ────────────────────────────────────────────────────────
+function TimeOffSection({ staff }) {
+  const qc = useQueryClient()
+  const [modalOpen, setModalOpen] = useState(false)
+
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: ['time-off'],
+    queryFn: () => api.get('/time-off').then(r => r.data),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: body => api.post('/time-off', body).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['time-off'] })
+      setModalOpen(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: id => api.delete(`/time-off/${id}`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['time-off'] }),
+  })
+
+  return (
+    <>
+      <div className="flex items-center justify-end mb-5">
+        <button
+          onClick={() => setModalOpen(true)}
+          className="flex items-center gap-2 px-5 py-2 rounded-full text-white text-[13px] font-bold bg-gradient-to-r from-[#0D9488] to-[#6366F1] hover:opacity-90 transition-all"
+        >
+          <Plus size={15} /> Add time off
+        </button>
+      </div>
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        {isLoading ? (
+          <div className="py-10 text-center text-[13px] text-slate-400">Loading…</div>
+        ) : entries.length === 0 ? (
+          <div className="py-20 flex flex-col items-center gap-3 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
+              <CalendarOff size={24} className="text-slate-400" />
+            </div>
+            <p className="text-[15px] font-bold text-slate-700">No time off scheduled</p>
+            <p className="text-[13px] text-slate-400 max-w-xs">
+              Log a team member's time off to keep it out of your schedule and payroll.
+            </p>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="mt-1 flex items-center gap-2 px-4 py-2 rounded-full text-white text-[13px] font-semibold bg-gradient-to-r from-[#0D9488] to-[#6366F1] hover:opacity-90 transition-all"
+            >
+              <Plus size={14} /> Add time off
+            </button>
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-100">
+              <tr>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Team member</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Dates</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Reason</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {entries.map(e => (
+                <tr key={e.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-[13px] font-semibold text-slate-800">{e.staff_name}</td>
+                  <td className="px-4 py-3 text-[13px] text-slate-600">{e.start_date} – {e.end_date}</td>
+                  <td className="px-4 py-3 text-[13px] text-slate-500">{e.reason || '—'}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold capitalize bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {e.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => deleteMutation.mutate(e.id)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {modalOpen && (
+        <AddTimeOffModal
+          staff={staff}
+          onClose={() => setModalOpen(false)}
+          onSubmit={body => createMutation.mutate(body)}
+          isLoading={createMutation.isPending}
+        />
+      )}
+    </>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────
 export default function StaffShifts() {
   const qc = useQueryClient()
+  const [tab, setTab] = useState('shifts')
   const [weekOffset, setWeekOffset] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
   const [modalDate, setModalDate] = useState('')
@@ -243,21 +455,41 @@ export default function StaffShifts() {
     shiftMap[s.shift_date][s.staff_id].push(s)
   }
 
-  const staffById = Object.fromEntries(staff.map(s => [s.id, s]))
-
   return (
     <div className="">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-[22px] font-bold text-slate-900">Scheduled shifts</h1>
+        {tab === 'shifts' && (
+          <button
+            onClick={() => openModal()}
+            className="flex items-center gap-2 px-5 py-2 rounded-full text-white text-[13px] font-bold bg-gradient-to-r from-[#0D9488] to-[#6366F1] hover:opacity-90 transition-all"
+          >
+            <Plus size={15} /> Add shift
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 mb-6 bg-slate-100 rounded-full p-1 w-fit">
         <button
-          onClick={() => openModal()}
-          className="flex items-center gap-2 px-5 py-2 rounded-full text-white text-[13px] font-bold bg-gradient-to-r from-[#0D9488] to-[#6366F1] hover:opacity-90 transition-all"
+          onClick={() => setTab('shifts')}
+          className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition-colors ${tab === 'shifts' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
-          <Plus size={15} /> Add shift
+          Shifts
+        </button>
+        <button
+          onClick={() => setTab('timeoff')}
+          className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition-colors ${tab === 'timeoff' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Time off
         </button>
       </div>
 
+      {tab === 'timeoff' && <TimeOffSection staff={staff} />}
+
+      {tab === 'shifts' && (
+      <>
       {/* Week nav */}
       <div className="flex items-center gap-3 mb-5">
         <button
@@ -369,6 +601,8 @@ export default function StaffShifts() {
           ))
         )}
       </div>
+      </>
+      )}
 
       {modalOpen && (
         <AddShiftModal

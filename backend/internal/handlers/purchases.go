@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -446,9 +447,13 @@ func (a *App) UpdatePOStatus(w http.ResponseWriter, r *http.Request) {
 				var invID uint
 				var qty float64
 				itemRows.Scan(&invID, &qty)
+				var qtyBefore float64
+				_ = a.DB.QueryRowContext(r.Context(),
+					`SELECT stock_qty FROM inventory_items WHERE id=? AND salon_id=?`, invID, claims.SalonID).Scan(&qtyBefore)
 				a.DB.ExecContext(r.Context(),
 					`UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id=? AND salon_id=?`,
 					qty, invID, claims.SalonID)
+				a.logStockMovement(r.Context(), claims.SalonID, int64(invID), "purchase", qty, qtyBefore, "PO marked received", fmt.Sprintf("PO#%d", id), 0)
 			}
 		}
 	}
@@ -508,9 +513,13 @@ func (a *App) ReceivePOItems(w http.ResponseWriter, r *http.Request) {
 		// Add delta to inventory stock
 		delta := it.QtyReceived - prevQty
 		if delta > 0 && invID.Valid {
+			var qtyBefore float64
+			_ = a.DB.QueryRowContext(r.Context(),
+				`SELECT stock_qty FROM inventory_items WHERE id=? AND salon_id=?`, invID.Int64, claims.SalonID).Scan(&qtyBefore)
 			a.DB.ExecContext(r.Context(),
 				`UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id=? AND salon_id=?`,
 				delta, invID.Int64, claims.SalonID)
+			a.logStockMovement(r.Context(), claims.SalonID, invID.Int64, "purchase", delta, qtyBefore, "", fmt.Sprintf("PO#%d", poID), 0)
 		}
 	}
 
@@ -678,9 +687,13 @@ func (a *App) CreateDirectPurchase(w http.ResponseWriter, r *http.Request) {
 
 		// Update inventory stock and cost_price (latest cost approach)
 		if it.InventoryItemID != nil {
+			var qtyBefore float64
+			_ = a.DB.QueryRowContext(r.Context(),
+				`SELECT stock_qty FROM inventory_items WHERE id=? AND salon_id=?`, *it.InventoryItemID, claims.SalonID).Scan(&qtyBefore)
 			a.DB.ExecContext(r.Context(),
 				`UPDATE inventory_items SET stock_qty = stock_qty + ?, cost_price=? WHERE id=? AND salon_id=?`,
 				it.Qty, it.UnitCost, *it.InventoryItemID, claims.SalonID)
+			a.logStockMovement(r.Context(), claims.SalonID, int64(*it.InventoryItemID), "purchase", it.Qty, qtyBefore, "Direct purchase", "", it.UnitCost)
 		}
 	}
 
@@ -706,4 +719,196 @@ func nullableDate(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// ── Stocktakes ────────────────────────────────────────────────────────────────
+
+func (a *App) ListStocktakes(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT s.id, s.name, s.status,
+		       COUNT(si.id) as item_count,
+		       SUM(CASE WHEN si.counted_qty IS NOT NULL AND si.counted_qty != si.expected_qty THEN 1 ELSE 0 END) as variance_count,
+		       DATE(s.created_at), COALESCE(DATE(s.completed_at),'')
+		FROM stocktakes s
+		LEFT JOIN stocktake_items si ON si.stocktake_id = s.id
+		WHERE s.salon_id = ?
+		GROUP BY s.id
+		ORDER BY s.created_at DESC`, sid)
+	type row struct {
+		ID            int    `json:"id"`
+		Name          string `json:"name"`
+		Status        string `json:"status"`
+		ItemCount     int    `json:"item_count"`
+		VarianceCount int    `json:"variance_count"`
+		CreatedAt     string `json:"created_at"`
+		CompletedAt   string `json:"completed_at"`
+	}
+	list := []row{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var r row
+			rows.Scan(&r.ID, &r.Name, &r.Status, &r.ItemCount, &r.VarianceCount, &r.CreatedAt, &r.CompletedAt)
+			list = append(list, r)
+		}
+	}
+	a.JSON(w, http.StatusOK, list)
+}
+
+func (a *App) CreateStocktake(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+
+	var body struct {
+		Name  string `json:"name"`
+		Notes string `json:"notes"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	res, err := a.DB.ExecContext(ctx,
+		`INSERT INTO stocktakes (salon_id, name, notes, status) VALUES (?,?,?,'draft')`,
+		sid, body.Name, body.Notes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	stID, _ := res.LastInsertId()
+
+	// Auto-populate items from current inventory
+	irows, _ := a.DB.QueryContext(ctx,
+		`SELECT id, name, COALESCE(sku,''), stock_qty FROM inventory_items WHERE salon_id=? AND is_active=1 ORDER BY name`, sid)
+	if irows != nil {
+		defer irows.Close()
+		for irows.Next() {
+			var iid int
+			var iname, sku string
+			var qty int
+			irows.Scan(&iid, &iname, &sku, &qty)
+			a.DB.ExecContext(ctx,
+				`INSERT INTO stocktake_items (stocktake_id, inventory_item_id, product_name, sku, expected_qty) VALUES (?,?,?,?,?)`,
+				stID, iid, iname, sku, qty)
+		}
+	}
+
+	a.JSON(w, http.StatusCreated, map[string]any{"id": stID})
+}
+
+func (a *App) GetStocktake(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	var st struct {
+		ID     int    `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	err := a.DB.QueryRowContext(ctx,
+		`SELECT id, name, status, COALESCE(notes,'') FROM stocktakes WHERE id=? AND salon_id=?`, id, sid).
+		Scan(&st.ID, &st.Name, &st.Status, &st.Notes)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	rows, err := a.DB.QueryContext(ctx,
+		`SELECT id, inventory_item_id, product_name, sku, expected_qty, counted_qty
+		 FROM stocktake_items WHERE stocktake_id=? ORDER BY product_name`, id)
+	type item struct {
+		ID              int     `json:"id"`
+		InventoryItemID int     `json:"inventory_item_id"`
+		ProductName     string  `json:"product_name"`
+		SKU             string  `json:"sku"`
+		ExpectedQty     int     `json:"expected_qty"`
+		CountedQty      *int    `json:"counted_qty"`
+	}
+	items := []item{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var it item
+			rows.Scan(&it.ID, &it.InventoryItemID, &it.ProductName, &it.SKU, &it.ExpectedQty, &it.CountedQty)
+			items = append(items, it)
+		}
+	}
+
+	a.JSON(w, http.StatusOK, map[string]any{
+		"id":     st.ID,
+		"name":   st.Name,
+		"status": st.Status,
+		"notes":  st.Notes,
+		"items":  items,
+	})
+}
+
+func (a *App) UpdateStocktakeItems(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	// Verify ownership
+	var check int
+	if a.DB.QueryRowContext(ctx, `SELECT id FROM stocktakes WHERE id=? AND salon_id=? AND status!='completed'`, id, sid).Scan(&check) != nil {
+		http.Error(w, "not found or already completed", http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		Items []struct {
+			ID         int `json:"id"`
+			CountedQty int `json:"counted_qty"`
+		} `json:"items"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+
+	for _, it := range body.Items {
+		a.DB.ExecContext(ctx, `UPDATE stocktake_items SET counted_qty=? WHERE id=? AND stocktake_id=?`, it.CountedQty, it.ID, id)
+	}
+	// Move to in_progress if still draft
+	a.DB.ExecContext(ctx, `UPDATE stocktakes SET status='in_progress' WHERE id=? AND status='draft'`, id)
+
+	a.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *App) CompleteStocktake(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	res, err := a.DB.ExecContext(ctx,
+		`UPDATE stocktakes SET status='completed', completed_at=NOW() WHERE id=? AND salon_id=? AND status!='completed'`,
+		id, sid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	a.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *App) DeleteStocktake(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	sid := claims.SalonID
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	a.DB.ExecContext(ctx, `DELETE FROM stocktakes WHERE id=? AND salon_id=? AND status='draft'`, id, sid)
+	w.WriteHeader(http.StatusNoContent)
 }

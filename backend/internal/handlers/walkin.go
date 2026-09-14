@@ -218,17 +218,23 @@ func (a *App) PublicAppointmentsByPhone(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT ap.id, ap.start_at, ap.status,
-		       s.name,
-		       CONCAT(u.first_name,' ',u.last_name),
+		       COALESCE(
+		         (SELECT GROUP_CONCAT(sv.name ORDER BY aps.id SEPARATOR ', ')
+		          FROM appointment_services aps
+		          JOIN services sv ON sv.id = aps.service_id
+		          WHERE aps.appointment_id = ap.id),
+		         ''
+		       ),
+		       TRIM(COALESCE(CONCAT(u.first_name,' ',u.last_name),'')),
 		       CONCAT(c.first_name,' ',c.last_name)
 		FROM appointments ap
 		JOIN clients c  ON c.id = ap.client_id AND c.salon_id = ap.salon_id
-		JOIN services s ON s.id = ap.service_id
-		LEFT JOIN users u ON u.id = ap.staff_id
+		LEFT JOIN staff_profiles sp ON sp.id = ap.staff_id
+		LEFT JOIN users u ON u.id = sp.user_id
 		WHERE c.phone = ?
 		  AND ap.salon_id = ?
 		  AND DATE(ap.start_at) = CURDATE()
-		  AND ap.status IN ('scheduled','confirmed')
+		  AND ap.status IN ('pending','confirmed')
 		ORDER BY ap.start_at ASC`, phone, salonID)
 	if err != nil {
 		a.JSON(w, http.StatusOK, []any{})
@@ -273,7 +279,7 @@ func (a *App) PublicAppointmentCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.DB.ExecContext(r.Context(),
 		`UPDATE appointments SET status='checked_in', checked_in_at=NOW()
-		 WHERE id=? AND status IN ('scheduled','confirmed')`, id)
+		 WHERE id=? AND status IN ('pending','confirmed')`, id)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

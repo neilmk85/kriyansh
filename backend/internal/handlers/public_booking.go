@@ -167,7 +167,9 @@ func (a *App) PublicListSlots(w http.ResponseWriter, r *http.Request) {
 	a.JSON(w, http.StatusOK, slots)
 }
 
-// GET /api/public/staff — list stylists for booking form
+// GET /api/public/staff?service_ids=1,2 — list stylists for booking form.
+// When service_ids is given, only staff eligible for EVERY listed service are
+// returned (a service with no staff_services rows is unrestricted).
 func (a *App) PublicListStaff(w http.ResponseWriter, r *http.Request) {
 	// Determine salon from first salon
 	var salonID uint
@@ -176,11 +178,20 @@ func (a *App) PublicListStaff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT sp.id, CONCAT(u.first_name,' ',u.last_name), COALESCE(sp.specializations,''), COALESCE(sp.color,'#0D9488')
+	query := `SELECT sp.id, CONCAT(u.first_name,' ',u.last_name), COALESCE(sp.specializations,''), COALESCE(sp.color,'#0D9488')
 		 FROM staff_profiles sp JOIN users u ON u.id=sp.user_id
-		 WHERE sp.salon_id=? AND sp.accepts_online=1 AND u.is_active=1
-		 ORDER BY u.first_name`, salonID)
+		 WHERE sp.salon_id=? AND sp.accepts_online=1 AND u.is_active=1`
+	args := []any{salonID}
+	for _, sid := range parseUintCSV(r.URL.Query().Get("service_ids")) {
+		query += ` AND (
+			NOT EXISTS (SELECT 1 FROM staff_services WHERE service_id = ?)
+			OR EXISTS (SELECT 1 FROM staff_services WHERE service_id = ? AND staff_id = sp.id)
+		)`
+		args = append(args, sid, sid)
+	}
+	query += ` ORDER BY u.first_name`
+
+	rows, err := a.DB.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		a.JSON(w, http.StatusOK, []struct{}{})
 		return

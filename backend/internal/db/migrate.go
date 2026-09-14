@@ -29,6 +29,19 @@ func addColumnIfNotExists(db *sql.DB, table, column, definition string) error {
 // Migrate runs CREATE TABLE IF NOT EXISTS for all application tables.
 func Migrate(db *sql.DB) error {
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS businesses (
+			id INT PRIMARY KEY AUTO_INCREMENT,
+			name VARCHAR(255) NOT NULL,
+			email VARCHAR(255),
+			phone VARCHAR(20),
+			website VARCHAR(255),
+			logo_url VARCHAR(500),
+			country VARCHAR(10) DEFAULT 'AU',
+			timezone VARCHAR(50) DEFAULT 'Australia/Melbourne',
+			currency VARCHAR(10) DEFAULT 'AUD',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE IF NOT EXISTS transactions (
 			id INT PRIMARY KEY AUTO_INCREMENT,
 			salon_id INT NOT NULL,
@@ -326,6 +339,21 @@ func Migrate(db *sql.DB) error {
 			INDEX idx_gc_salon (salon_id),
 			INDEX idx_gc_code (code)
 		)`,
+		`CREATE TABLE IF NOT EXISTS resources (
+			id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+			salon_id INT UNSIGNED NOT NULL,
+			name VARCHAR(120) NOT NULL,
+			icon VARCHAR(40) DEFAULT 'armchair' COMMENT 'chair, room, door, bed, etc.',
+			is_active TINYINT(1) DEFAULT 1,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_resources_salon (salon_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS staff_service_commissions (
+			staff_id INT UNSIGNED NOT NULL,
+			service_id INT UNSIGNED NOT NULL,
+			commission_pct DECIMAL(5,2) NOT NULL,
+			PRIMARY KEY (staff_id, service_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS shifts (
 			id         INT PRIMARY KEY AUTO_INCREMENT,
 			salon_id   INT NOT NULL,
@@ -407,6 +435,27 @@ func Migrate(db *sql.DB) error {
 			total_cost        DECIMAL(10,2) NOT NULL,
 			INDEX idx_poi_po (po_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS stocktakes (
+			id           INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id     INT NOT NULL,
+			name         VARCHAR(255) NOT NULL,
+			status       ENUM('draft','in_progress','completed') DEFAULT 'draft',
+			notes        TEXT,
+			completed_at TIMESTAMP NULL,
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_st_salon (salon_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS stocktake_items (
+			id                 INT PRIMARY KEY AUTO_INCREMENT,
+			stocktake_id       INT NOT NULL,
+			inventory_item_id  INT NOT NULL,
+			product_name       VARCHAR(255) NOT NULL,
+			sku                VARCHAR(100) DEFAULT '',
+			expected_qty       INT NOT NULL DEFAULT 0,
+			counted_qty        INT NULL,
+			INDEX idx_sti_stocktake (stocktake_id),
+			FOREIGN KEY (stocktake_id) REFERENCES stocktakes(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS direct_purchases (
 			id            INT PRIMARY KEY AUTO_INCREMENT,
 			salon_id      INT NOT NULL,
@@ -432,6 +481,82 @@ func Migrate(db *sql.DB) error {
 			total_cost          DECIMAL(10,2) NOT NULL,
 			INDEX idx_dpi_dp (direct_purchase_id)
 		)`,
+		// ── Stock Movements ───────────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS stock_movements (
+			id                INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id          INT NOT NULL,
+			inventory_item_id INT NOT NULL,
+			movement_type     ENUM('purchase','sale','adjustment','wastage','stocktake') NOT NULL,
+			delta             DECIMAL(10,3) NOT NULL,
+			qty_before        DECIMAL(10,3) NOT NULL DEFAULT 0,
+			qty_after         DECIMAL(10,3) NOT NULL DEFAULT 0,
+			reason            VARCHAR(500) DEFAULT '',
+			reference         VARCHAR(255) DEFAULT '',
+			cost_per_unit     DECIMAL(10,4) DEFAULT 0,
+			created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_sm_item (salon_id, inventory_item_id),
+			INDEX idx_sm_type (salon_id, movement_type),
+			INDEX idx_sm_date (salon_id, created_at)
+		)`,
+		// ── Pay Runs ─────────────────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS payruns (
+			id           INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id     INT NOT NULL,
+			period_from  DATE NOT NULL,
+			period_to    DATE NOT NULL,
+			status       ENUM('draft','pending','completed') DEFAULT 'draft',
+			total_amount DECIMAL(10,2) DEFAULT 0,
+			created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			notes        TEXT,
+			INDEX idx_pr_salon (salon_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS payrun_items (
+			id           INT PRIMARY KEY AUTO_INCREMENT,
+			payrun_id    INT NOT NULL,
+			staff_id     INT NOT NULL,
+			staff_name   VARCHAR(255),
+			hours_worked DECIMAL(8,2) DEFAULT 0,
+			hourly_rate  DECIMAL(8,2) DEFAULT 0,
+			base_pay     DECIMAL(10,2) DEFAULT 0,
+			commission   DECIMAL(10,2) DEFAULT 0,
+			tips         DECIMAL(10,2) DEFAULT 0,
+			total_pay    DECIMAL(10,2) DEFAULT 0,
+			INDEX idx_pri_payrun (payrun_id)
+		)`,
+		// ── Staff breaks (auto-logged from kiosk status toggle) ────────────────
+		`CREATE TABLE IF NOT EXISTS staff_breaks (
+			id         INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id   INT NOT NULL,
+			staff_id   INT NOT NULL,
+			start_at   DATETIME NOT NULL,
+			end_at     DATETIME NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_sb_salon_staff (salon_id, staff_id),
+			INDEX idx_sb_open (staff_id, end_at)
+		)`,
+		// ── Team time off ────────────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS time_off_requests (
+			id         INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id   INT NOT NULL,
+			staff_id   INT NOT NULL,
+			start_date DATE NOT NULL,
+			end_date   DATE NOT NULL,
+			reason     VARCHAR(255) DEFAULT '',
+			status     ENUM('pending','approved','rejected') DEFAULT 'approved',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_tor_salon_dates (salon_id, start_date, end_date)
+		)`,
+		// ── Fee deductions applied to staff earnings ────────────────────────────
+		`CREATE TABLE IF NOT EXISTS fee_deductions (
+			id         INT PRIMARY KEY AUTO_INCREMENT,
+			salon_id   INT NOT NULL,
+			staff_id   INT NOT NULL,
+			amount     DECIMAL(10,2) NOT NULL,
+			reason     VARCHAR(255) DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_fd_salon_staff (salon_id, staff_id),
+			INDEX idx_fd_created (created_at)
+		)`,
 		// ── SMS Jobs ─────────────────────────────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS sms_jobs (
 			id             INT PRIMARY KEY AUTO_INCREMENT,
@@ -444,6 +569,24 @@ func Migrate(db *sql.DB) error {
 			sent_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_sms_appt (appointment_id, job_type),
 			INDEX idx_sms_salon (salon_id)
+		)`,
+		// ── Intake Forms ─────────────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS forms (
+		    id         INT PRIMARY KEY AUTO_INCREMENT,
+		    salon_id   INT NOT NULL,
+		    name       VARCHAR(255) NOT NULL,
+		    fields     JSON NOT NULL,
+		    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		    INDEX idx_forms_salon (salon_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS form_responses (
+		    id           INT PRIMARY KEY AUTO_INCREMENT,
+		    form_id      INT NOT NULL,
+		    client_id    INT,
+		    responses    JSON NOT NULL,
+		    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		    INDEX idx_fr_form (form_id)
 		)`,
 		// ── Walk-in Queue ─────────────────────────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS walk_in_queue (
@@ -514,11 +657,152 @@ func Migrate(db *sql.DB) error {
 		// Recurring bookings
 		{"appointments",     "recurring_frequency",        "VARCHAR(20) DEFAULT NULL COMMENT 'Weekly,Every 2 Weeks,Monthly'"},
 		{"appointments",     "recurring_confirmed",        "TINYINT DEFAULT 0 COMMENT '1 = next booking already confirmed at kiosk'"},
+		// Staff kiosk availability
+		{"staff_profiles",   "kiosk_status",               "VARCHAR(20) DEFAULT 'available' COMMENT 'available,busy,break'"},
+		// Extended client profile fields (imported from Fresha export)
+		{"clients", "fresha_id",        "VARCHAR(30) NULL COMMENT 'External Fresha client ID'"},
+		{"clients", "marketing_consent","TINYINT DEFAULT 0 COMMENT 'General email/marketing opt-in'"},
+		{"clients", "telephone",        "VARCHAR(25) NULL COMMENT 'Secondary/landline phone'"},
+		{"clients", "address_line1",    "VARCHAR(255) NULL"},
+		{"clients", "address_line2",    "VARCHAR(100) NULL COMMENT 'Apartment / Suite'"},
+		{"clients", "address_area",     "VARCHAR(100) NULL COMMENT 'Neighbourhood / Area'"},
+		{"clients", "address_city",     "VARCHAR(100) NULL"},
+		{"clients", "address_state",    "VARCHAR(60) NULL"},
+		{"clients", "address_postcode", "VARCHAR(20) NULL"},
+		{"clients", "staff_alert",      "TEXT NULL COMMENT 'Shown prominently to staff during booking'"},
+		{"clients", "tags",             "VARCHAR(500) NULL COMMENT 'Comma-separated client tags'"},
+		{"clients", "avatar_url",       "VARCHAR(512) NULL COMMENT 'Permanent local avatar path e.g. /static/avatars/123.jpg'"},
+		// Staff hourly rate for pay run calculations
+		{"staff_profiles", "hourly_rate", "DECIMAL(8,2) DEFAULT 0 COMMENT 'Base hourly rate for payroll'"},
+		// Owner reply to a client review
+		{"review_responses", "owner_response", "TEXT NULL COMMENT 'Owner public reply to the review'"},
+		// Optional physical resource (room/chair/station) booked for an appointment
+		{"appointments", "resource_id", "INT UNSIGNED NULL"},
 	}
 	for _, m := range colMigrations {
 		if err := addColumnIfNotExists(db, m.table, m.column, m.def); err != nil {
 			return err
 		}
+	}
+
+	// Widen gift_cards.status to support customer self-purchase requests that
+	// need staff to confirm payment before the card becomes redeemable.
+	if _, err := db.Exec(`
+		ALTER TABLE gift_cards
+		MODIFY COLUMN status ENUM('active','redeemed','expired','pending_payment') DEFAULT 'active'`); err != nil {
+		return fmt.Errorf("widen gift_cards.status: %w", err)
+	}
+
+	// Widen appointments.source to include 'reception', the default used for
+	// appointments booked by staff from the admin calendar.
+	if _, err := db.Exec(`
+		ALTER TABLE appointments
+		MODIFY COLUMN source ENUM('walk_in','online','phone','google_reserve','instagram','reception') DEFAULT 'online'`); err != nil {
+		return fmt.Errorf("widen appointments.source: %w", err)
+	}
+
+	// ── clients new columns ───────────────────────────────────────────────
+	for _, m := range []struct{ col, def string }{
+		{"anniversary", "DATE NULL"},
+		{"preferences", "TEXT NULL"},
+	} {
+		if err := addColumnIfNotExists(db, "clients", m.col, m.def); err != nil {
+			return err
+		}
+	}
+
+	// ── service_addons table ──────────────────────────────────────────────
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS service_addons (
+		id          INT PRIMARY KEY AUTO_INCREMENT,
+		salon_id    INT NOT NULL,
+		service_id  INT NOT NULL,
+		name        VARCHAR(255) NOT NULL,
+		price       DECIMAL(10,2) NOT NULL DEFAULT 0,
+		duration_min INT NOT NULL DEFAULT 0,
+		is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+		created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		INDEX idx_sa_service (service_id)
+	)`); err != nil {
+		return fmt.Errorf("create service_addons: %w", err)
+	}
+
+	// ── salon_settings new columns ───────────────────────────────────────
+	for _, m := range []struct{ col, def string }{
+		{"logo_url", "VARCHAR(500) NULL"},
+		{"abn", "VARCHAR(14) NULL"},
+		{"gst_registered", "BOOLEAN NOT NULL DEFAULT FALSE"},
+		{"website_url", "VARCHAR(255) NULL"},
+		{"instagram_url", "VARCHAR(255) NULL"},
+		{"facebook_url", "VARCHAR(255) NULL"},
+	} {
+		if err := addColumnIfNotExists(db, "salon_settings", m.col, m.def); err != nil {
+			return err
+		}
+	}
+
+	// ── salon_holidays table ──────────────────────────────────────────────
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS salon_holidays (
+		id         INT PRIMARY KEY AUTO_INCREMENT,
+		salon_id   INT NOT NULL,
+		date       DATE NOT NULL,
+		name       VARCHAR(255) NOT NULL,
+		repeat_yearly BOOLEAN NOT NULL DEFAULT FALSE,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uq_salon_holiday (salon_id, date)
+	)`); err != nil {
+		return fmt.Errorf("create salon_holidays: %w", err)
+	}
+
+	// Add business_id to salons (safe — no-op if column already exists)
+	if err := addColumnIfNotExists(db, "salons", "business_id", "INT UNSIGNED NULL"); err != nil {
+		return err
+	}
+
+	// Seed the default business for existing installations
+	if _, err := db.Exec(`
+		INSERT IGNORE INTO businesses (id, name, timezone, currency, country)
+		VALUES (1, 'Kriyansh Beauty Bar', 'Australia/Melbourne', 'AUD', 'AU')`); err != nil {
+		return fmt.Errorf("seed default business: %w", err)
+	}
+
+	// Link all unlinked salons to the default business
+	if _, err := db.Exec(`UPDATE salons SET business_id = 1 WHERE business_id IS NULL`); err != nil {
+		return fmt.Errorf("link salons to default business: %w", err)
+	}
+
+	// ── PAX terminal config on salon_settings ────────────────────────────────────
+	for _, m := range []struct{ col, def string }{
+		{"pax_terminal_ip",   "VARCHAR(45) NULL COMMENT 'PAX terminal LAN IP e.g. 192.168.1.100'"},
+		{"pax_terminal_port", "SMALLINT UNSIGNED NOT NULL DEFAULT 10009 COMMENT 'PAX POSLINK HTTP port'"},
+	} {
+		if err := addColumnIfNotExists(db, "salon_settings", m.col, m.def); err != nil {
+			return err
+		}
+	}
+
+	// ── Widen transactions.payment_method to include gift_card, upi, qr, advance ─
+	if _, err := db.Exec(`
+		ALTER TABLE transactions
+		MODIFY COLUMN payment_method ENUM('card','cash','tap','gift_card','upi','qr','advance','split') NOT NULL DEFAULT 'card'`); err != nil {
+		return fmt.Errorf("widen transactions.payment_method: %w", err)
+	}
+
+	// ── Add product_id to transaction_items ────────────────────────────────────
+	if err := addColumnIfNotExists(db, "transaction_items", "product_id", "INT NULL COMMENT 'inventory_items.id if this line is a product'"); err != nil {
+		return err
+	}
+
+	// ── split_payment_method on transactions (second method for split payments) ─
+	if err := addColumnIfNotExists(db, "transactions", "split_payment_method", "ENUM('card','cash','tap','gift_card','upi','qr') NULL"); err != nil {
+		return err
+	}
+	if err := addColumnIfNotExists(db, "transactions", "split_amount", "DECIMAL(10,2) NULL COMMENT 'Amount paid via second method'"); err != nil {
+		return err
+	}
+
+	// ── Membership expiry tracking ───────────────────────────────────────────
+	if err := addColumnIfNotExists(db, "client_memberships", "expires_at", "DATE NULL COMMENT 'Hard expiry date — auto-set from billing_cycle on assign/renew'"); err != nil {
+		return err
 	}
 
 	slog.Info("database migrations applied")

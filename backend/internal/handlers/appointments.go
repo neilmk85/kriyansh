@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -178,13 +179,28 @@ func (a *App) GetAppointment(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAppointmentRequest struct {
-	ClientID uint                       `json:"client_id"`
-	StaffID  uint                       `json:"staff_id"`
-	StartAt  time.Time                  `json:"start_at"`
-	EndAt    time.Time                  `json:"end_at"`
-	Notes    string                     `json:"notes"`
-	Source   string                     `json:"source"`
-	Services []models.AppointmentService `json:"services"`
+	ClientID   uint                        `json:"client_id"`
+	StaffID    uint                        `json:"staff_id"`
+	ResourceID *uint                       `json:"resource_id"`
+	StartAt    time.Time                   `json:"start_at"`
+	EndAt      time.Time                   `json:"end_at"`
+	Notes      string                      `json:"notes"`
+	Source     string                      `json:"source"`
+	Services   []models.AppointmentService `json:"services"`
+}
+
+// resourceConflict returns true if the given resource already has a
+// non-cancelled appointment overlapping [startAt, endAt), excluding
+// excludeApptID (0 to not exclude anything).
+func (a *App) resourceConflict(ctx context.Context, salonID uint, resourceID uint, excludeApptID uint64, startAt, endAt time.Time) (bool, error) {
+	var conflicts int
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM appointments
+		WHERE salon_id=? AND resource_id=? AND id<>?
+		  AND status NOT IN ('cancelled','no_show')
+		  AND start_at < ? AND end_at > ?`,
+		salonID, resourceID, excludeApptID, endAt.UTC(), startAt.UTC()).Scan(&conflicts)
+	return conflicts > 0, err
 }
 
 func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +214,33 @@ func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
 		req.Source = "reception"
 	}
 
+	// Check staff double-booking
+	if req.StaffID != 0 {
+		var staffConflicts int
+		a.DB.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM appointments
+			WHERE salon_id=? AND staff_id=?
+			  AND status NOT IN ('cancelled','no_show')
+			  AND start_at < ? AND end_at > ?`,
+			claims.SalonID, req.StaffID, req.EndAt.UTC(), req.StartAt.UTC()).Scan(&staffConflicts)
+		if staffConflicts > 0 {
+			a.Error(w, http.StatusConflict, "that staff member is already booked at this time")
+			return
+		}
+	}
+
+	if req.ResourceID != nil {
+		conflict, err := a.resourceConflict(r.Context(), claims.SalonID, *req.ResourceID, 0, req.StartAt, req.EndAt)
+		if err != nil {
+			a.Error(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if conflict {
+			a.Error(w, http.StatusConflict, "that resource is already booked at this time")
+			return
+		}
+	}
+
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "tx error")
@@ -206,9 +249,9 @@ func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(r.Context(),
-		`INSERT INTO appointments (salon_id, client_id, staff_id, start_at, end_at, notes, source)
-		 VALUES (?,?,?,?,?,?,?)`,
-		claims.SalonID, req.ClientID, req.StaffID,
+		`INSERT INTO appointments (salon_id, client_id, staff_id, resource_id, start_at, end_at, notes, source)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		claims.SalonID, req.ClientID, req.StaffID, req.ResourceID,
 		req.StartAt.UTC(), req.EndAt.UTC(), req.Notes, req.Source)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
@@ -237,6 +280,61 @@ func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RescheduleAppointment PATCH /api/appointments/{id}/reschedule — move an
+// appointment to a new time and/or staff member (drag-and-drop on the
+// calendar). Body: { start_at, end_at, staff_id }.
+func (a *App) RescheduleAppointment(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	id, err := pathID(r, "id")
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		StartAt time.Time `json:"start_at"`
+		EndAt   time.Time `json:"end_at"`
+		StaffID uint      `json:"staff_id"`
+	}
+	if err := a.Decode(r, &body); err != nil || body.StaffID == 0 || !body.EndAt.After(body.StartAt) {
+		a.Error(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	// Reject if the target staff member already has a conflicting appointment.
+	var conflicts int
+	err = a.DB.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) FROM appointments
+		WHERE salon_id=? AND staff_id=? AND id<>?
+		  AND status NOT IN ('cancelled','no_show')
+		  AND start_at < ? AND end_at > ?`,
+		claims.SalonID, body.StaffID, id, body.EndAt.UTC(), body.StartAt.UTC()).Scan(&conflicts)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if conflicts > 0 {
+		a.Error(w, http.StatusConflict, "that team member already has an appointment at this time")
+		return
+	}
+
+	res, err := a.DB.ExecContext(r.Context(),
+		`UPDATE appointments SET start_at=?, end_at=?, staff_id=? WHERE id=? AND salon_id=?`,
+		body.StartAt.UTC(), body.EndAt.UTC(), body.StaffID, id, claims.SalonID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		a.Error(w, http.StatusNotFound, "appointment not found")
+		return
+	}
+	a.logActivity(r.Context(), claims.SalonID, claims.UserID, "rescheduled", "appointment", uint(id), map[string]any{
+		"start_at": body.StartAt, "staff_id": body.StaffID,
+	})
+	a.JSON(w, http.StatusOK, map[string]any{"rescheduled": true})
+}
+
 func (a *App) UpdateAppointmentStatus(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
 	id, err := pathID(r, "id")
@@ -252,20 +350,32 @@ func (a *App) UpdateAppointmentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	validStatuses := map[string]bool{
-		"scheduled": true, "confirmed": true, "checked_in": true,
-		"in_progress": true, "completed": true, "cancelled": true, "no_show": true,
+		"pending": true, "scheduled": true, "confirmed": true, "checked_in": true,
+		"in_service": true, "in_progress": true, "completed": true, "cancelled": true, "no_show": true,
 	}
 	if !validStatuses[body.Status] {
 		a.Error(w, http.StatusBadRequest, "invalid status")
 		return
 	}
-	_, err = a.DB.ExecContext(r.Context(),
-		`UPDATE appointments SET status=? WHERE id=? AND salon_id=?`,
-		body.Status, id, claims.SalonID)
+	switch body.Status {
+	case "checked_in":
+		_, err = a.DB.ExecContext(r.Context(),
+			`UPDATE appointments SET status=?, checked_in_at=COALESCE(checked_in_at, NOW()) WHERE id=? AND salon_id=?`,
+			body.Status, id, claims.SalonID)
+	case "completed":
+		_, err = a.DB.ExecContext(r.Context(),
+			`UPDATE appointments SET status=?, checked_out_at=COALESCE(checked_out_at, NOW()) WHERE id=? AND salon_id=?`,
+			body.Status, id, claims.SalonID)
+	default:
+		_, err = a.DB.ExecContext(r.Context(),
+			`UPDATE appointments SET status=? WHERE id=? AND salon_id=?`,
+			body.Status, id, claims.SalonID)
+	}
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
 	}
+	a.logActivity(r.Context(), claims.SalonID, claims.UserID, "status_changed", "appointment", uint(id), map[string]any{"status": body.Status})
 	if body.Status == "cancelled" {
 		go a.TriggerGapFill(context.Background(), claims.SalonID, id)
 	}
@@ -416,7 +526,7 @@ func (a *App) ApproveCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE appointments SET status='in_progress'
+		`UPDATE appointments SET status='in_service'
 		 WHERE id=? AND salon_id=? AND status='checked_in'`,
 		id, claims.SalonID)
 	if err != nil {
@@ -443,7 +553,7 @@ func (a *App) CheckIn(w http.ResponseWriter, r *http.Request) {
 
 	res, err := a.DB.ExecContext(r.Context(),
 		`UPDATE appointments SET status='checked_in', checked_in_at=NOW()
-		 WHERE id=? AND status IN ('scheduled','confirmed')`,
+		 WHERE id=? AND status IN ('pending','confirmed')`,
 		body.AppointmentID)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
@@ -488,4 +598,87 @@ func (a *App) CheckOut(w http.ResponseWriter, r *http.Request) {
 		"checked_out":    true,
 		"appointment_id": body.AppointmentID,
 	})
+}
+
+func (a *App) ListAppointmentsFull(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	ctx := r.Context()
+	q := r.URL.Query()
+	search := "%" + q.Get("q") + "%"
+	status   := q.Get("status")
+	from     := q.Get("from")
+	to       := q.Get("to")
+	clientID := q.Get("client_id")
+	if from == "" { from = "2000-01-01" }
+	if to   == "" { to   = "2099-12-31" }
+
+	statusClause   := "1=1"
+	if status != "" && status != "all" { statusClause = "a.status = '" + status + "'" }
+
+	clientIDClause := "1=1"
+	args := []any{claims.SalonID, from, to, search, search}
+	if clientID != "" {
+		clientIDClause = "a.client_id = ?"
+		args = append(args, clientID)
+	}
+
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT
+			a.id, a.created_at, a.start_at, a.end_at, a.status,
+			CONCAT(c.first_name,' ',c.last_name) as client_name,
+			COALESCE(c.phone,''),
+			CONCAT(u.first_name,' ',u.last_name) as staff_name,
+			COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),'') as service_names,
+			COALESCE(SUM(aps.price),0) as total_price,
+			COALESCE(SUM(aps.duration_min),0) as total_duration
+		FROM appointments a
+		JOIN clients c ON c.id = a.client_id
+		JOIN staff_profiles sp ON sp.id = a.staff_id
+		JOIN users u ON u.id = sp.user_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
+		LEFT JOIN services s ON s.id = aps.service_id
+		WHERE a.salon_id=?
+		  AND DATE(a.start_at) >= ? AND DATE(a.start_at) <= ?
+		  AND (`+statusClause+`)
+		  AND (CONCAT(c.first_name,' ',c.last_name) LIKE ? OR c.phone LIKE ?)
+		  AND (`+clientIDClause+`)
+		GROUP BY a.id
+		ORDER BY a.start_at DESC
+		LIMIT 500`, args...)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type row struct {
+		ID           uint    `json:"id"`
+		Ref          string  `json:"ref"`
+		CreatedAt    string  `json:"created_at"`
+		StartAt      string  `json:"start_at"`
+		StartAtISO   string  `json:"start_at_iso"`
+		EndAt        string  `json:"end_at"`
+		Status       string  `json:"status"`
+		ClientName   string  `json:"client_name"`
+		ClientPhone  string  `json:"client_phone"`
+		StaffName    string  `json:"staff_name"`
+		ServiceNames string  `json:"service_names"`
+		TotalPrice   float64 `json:"total_price"`
+		DurationMin  int     `json:"duration_min"`
+	}
+	list := []row{}
+	for rows.Next() {
+		var r row
+		var startAt, endAt, createdAt time.Time
+		rows.Scan(&r.ID, &createdAt, &startAt, &endAt, &r.Status,
+			&r.ClientName, &r.ClientPhone, &r.StaffName,
+			&r.ServiceNames, &r.TotalPrice, &r.DurationMin)
+		r.Ref        = fmt.Sprintf("%08X", r.ID)
+		r.CreatedAt  = createdAt.Format("2 Jan 2006, 3:04pm")
+		r.StartAt    = startAt.Format("2 Jan 2006, 3:04pm")
+		r.StartAtISO = startAt.UTC().Format(time.RFC3339)
+		r.EndAt      = endAt.Format("3:04pm")
+		list = append(list, r)
+	}
+	a.JSON(w, http.StatusOK, list)
 }

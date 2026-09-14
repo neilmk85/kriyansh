@@ -83,7 +83,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 	// Pending / scheduled appointments today
 	a.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM appointments
-		 WHERE salon_id=? AND start_at>=? AND start_at<? AND status IN ('scheduled','confirmed')`,
+		 WHERE salon_id=? AND start_at>=? AND start_at<? AND status IN ('pending','confirmed')`,
 		sid, todayStart, todayEnd).Scan(&stats.PendingAppts)
 
 	// Avg ticket this month
@@ -108,7 +108,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		 JOIN users u ON u.id=sp.user_id
 		 LEFT JOIN appointment_services aps ON aps.appointment_id=a.id
 		 LEFT JOIN services s ON s.id=aps.service_id
-		 WHERE a.salon_id=? AND a.start_at>=? AND a.status IN ('scheduled','confirmed')
+		 WHERE a.salon_id=? AND a.start_at>=? AND a.status IN ('pending','confirmed')
 		 GROUP BY a.id ORDER BY a.start_at LIMIT 8`, sid, now)
 	var upcoming []upcomingAppt
 	if err == nil {

@@ -33,7 +33,13 @@ export default function Login() {
       await login(email, password)
       navigate('/admin')
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid email or password. Please try again.')
+      const msg = err.response?.data?.error || 'Something went wrong. Please try again.'
+      setError(msg)
+      if (msg.toLowerCase().includes('email') || msg.toLowerCase().includes('account')) {
+        setFieldErrors(f => ({ ...f, email: ' ' }))
+      } else if (msg.toLowerCase().includes('password')) {
+        setFieldErrors(f => ({ ...f, password: ' ' }))
+      }
     } finally {
       setLoading(false)
     }
@@ -218,6 +224,7 @@ export default function Login() {
           padding:'52px 64px',
           background:'#FFFFFF',
           position:'relative', zIndex:2,
+          overflowY:'auto',
         }}>
           {/* Logo */}
           <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, marginBottom:52 }}>
@@ -239,18 +246,6 @@ export default function Login() {
               Sign In
             </p>
           </div>
-
-          {/* Global error */}
-          {error && (
-            <div style={{
-              marginBottom:20, padding:'12px 14px',
-              background:'#FEF2F2', border:'1.5px solid #FECACA',
-              borderRadius:10, fontSize:13, color:'#DC2626',
-              display:'flex', alignItems:'center', gap:8,
-            }}>
-              <span>⚠</span> {error}
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} noValidate>
             {/* Email */}
@@ -319,6 +314,18 @@ export default function Login() {
                 Forgot password?
               </a>
             </div>
+
+            {/* Global error */}
+            {error && (
+              <div style={{
+                marginBottom:16, padding:'11px 14px',
+                background:'#FEF2F2', border:'1.5px solid #FECACA',
+                borderRadius:10, fontSize:13, color:'#DC2626',
+                display:'flex', alignItems:'center', gap:8,
+              }}>
+                <span>⚠</span> {error}
+              </div>
+            )}
 
             {/* Sign In */}
             <button type="submit" className="btn-signin" disabled={loading} style={{ marginBottom:22 }}>

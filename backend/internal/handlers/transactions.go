@@ -17,6 +17,7 @@ type transactionItem struct {
 	ID            uint    `json:"id,omitempty"`
 	TransactionID uint    `json:"transaction_id,omitempty"`
 	ServiceID     *uint   `json:"service_id,omitempty"`
+	ProductID     *uint   `json:"product_id,omitempty"`
 	Name          string  `json:"name"`
 	Price         float64 `json:"price"`
 	Qty           int     `json:"qty"`
@@ -24,15 +25,17 @@ type transactionItem struct {
 }
 
 type createTransactionRequest struct {
-	ClientID      *uint             `json:"client_id"`
-	Items         []transactionItem `json:"items"`
-	Subtotal      float64           `json:"subtotal"`
-	Discount      float64           `json:"discount"`
-	TaxAmount     float64           `json:"tax_amount"`
-	TipAmount     float64           `json:"tip_amount"`
-	GrandTotal    float64           `json:"grand_total"`
-	PaymentMethod string            `json:"payment_method"`
-	Notes         string            `json:"notes"`
+	ClientID            *uint             `json:"client_id"`
+	Items               []transactionItem `json:"items"`
+	Subtotal            float64           `json:"subtotal"`
+	Discount            float64           `json:"discount"`
+	TaxAmount           float64           `json:"tax_amount"`
+	TipAmount           float64           `json:"tip_amount"`
+	GrandTotal          float64           `json:"grand_total"`
+	PaymentMethod       string            `json:"payment_method"`
+	SplitPaymentMethod  string            `json:"split_payment_method,omitempty"`
+	SplitAmount         float64           `json:"split_amount,omitempty"`
+	Notes               string            `json:"notes"`
 }
 
 // CreateTransaction POST /api/transactions
@@ -55,12 +58,18 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	var splitMethod *string
+	var splitAmt *float64
+	if req.SplitPaymentMethod != "" && req.SplitAmount > 0 {
+		splitMethod = &req.SplitPaymentMethod
+		splitAmt = &req.SplitAmount
+	}
 	res, err := tx.ExecContext(r.Context(),
 		`INSERT INTO transactions
-			(salon_id, client_id, subtotal, discount, tax_amount, tip_amount, grand_total, payment_method, notes)
-		 VALUES (?,?,?,?,?,?,?,?,?)`,
+			(salon_id, client_id, subtotal, discount, tax_amount, tip_amount, grand_total, payment_method, split_payment_method, split_amount, notes)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		claims.SalonID, req.ClientID, req.Subtotal, req.Discount,
-		req.TaxAmount, req.TipAmount, req.GrandTotal, req.PaymentMethod, req.Notes)
+		req.TaxAmount, req.TipAmount, req.GrandTotal, req.PaymentMethod, splitMethod, splitAmt, req.Notes)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
@@ -77,9 +86,9 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 			subtotal = item.Price * float64(qty)
 		}
 		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO transaction_items (transaction_id, service_id, name, price, qty, subtotal)
-			 VALUES (?,?,?,?,?,?)`,
-			txnID, item.ServiceID, item.Name, item.Price, qty, subtotal)
+			`INSERT INTO transaction_items (transaction_id, service_id, product_id, name, price, qty, subtotal)
+			 VALUES (?,?,?,?,?,?,?)`,
+			txnID, item.ServiceID, item.ProductID, item.Name, item.Price, qty, subtotal)
 		if err != nil {
 			a.Error(w, http.StatusInternalServerError, "item insert error")
 			return
@@ -91,9 +100,39 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 			`UPDATE clients SET total_visits = total_visits + 1 WHERE id = ?`, *req.ClientID)
 	}
 
+	// Deduct stock for any product line items — capture qty_before inside tx so reads are consistent
+	type pendingLog struct {
+		productID uint
+		qty       int
+		qtyBefore float64
+		name      string
+		price     float64
+	}
+	var stockLogs []pendingLog
+	for _, item := range req.Items {
+		if item.ProductID != nil {
+			qty := item.Qty
+			if qty <= 0 {
+				qty = 1
+			}
+			var qtyBefore float64
+			_ = tx.QueryRowContext(r.Context(),
+				`SELECT stock_qty FROM inventory_items WHERE id=? AND salon_id=?`, *item.ProductID, claims.SalonID).Scan(&qtyBefore)
+			_, _ = tx.ExecContext(r.Context(),
+				`UPDATE inventory_items SET stock_qty = GREATEST(0, stock_qty - ?) WHERE id = ? AND salon_id = ?`,
+				qty, *item.ProductID, claims.SalonID)
+			stockLogs = append(stockLogs, pendingLog{*item.ProductID, qty, qtyBefore, item.Name, item.Price})
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		a.Error(w, http.StatusInternalServerError, "commit error")
 		return
+	}
+
+	// Log movements after commit — so orphaned log rows can't appear if tx rolls back
+	for _, sl := range stockLogs {
+		a.logStockMovement(r.Context(), claims.SalonID, int64(sl.productID), "sale", -float64(sl.qty), sl.qtyBefore, "POS sale: "+sl.name, fmt.Sprintf("txn#%d", txnID), sl.price)
 	}
 
 	resp := map[string]any{
@@ -130,17 +169,23 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 func (a *App) ListTransactions(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
 
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT t.id, t.client_id,
+	clientID := r.URL.Query().Get("client_id")
+	query := `SELECT t.id, t.client_id,
 		        COALESCE(CONCAT(c.first_name,' ',c.last_name), 'Walk-in') AS client_name,
 		        t.grand_total, t.payment_method, t.status,
 		        (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.id) AS items_count,
 		        t.created_at
 		 FROM transactions t
 		 LEFT JOIN clients c ON c.id = t.client_id
-		 WHERE t.salon_id = ?
-		 ORDER BY t.created_at DESC
-		 LIMIT 100`, claims.SalonID)
+		 WHERE t.salon_id = ?`
+	args := []any{claims.SalonID}
+	if clientID != "" {
+		query += ` AND t.client_id = ?`
+		args = append(args, clientID)
+	}
+	query += ` ORDER BY t.created_at DESC LIMIT 100`
+
+	rows, err := a.DB.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
@@ -220,13 +265,13 @@ func (a *App) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id, transaction_id, service_id, name, price, qty, subtotal
+		`SELECT id, transaction_id, service_id, product_id, name, price, qty, subtotal
 		 FROM transaction_items WHERE transaction_id = ?`, id)
 	if err == nil {
 		defer itemRows.Close()
 		for itemRows.Next() {
 			var it transactionItem
-			itemRows.Scan(&it.ID, &it.TransactionID, &it.ServiceID,
+			itemRows.Scan(&it.ID, &it.TransactionID, &it.ServiceID, &it.ProductID,
 				&it.Name, &it.Price, &it.Qty, &it.Subtotal)
 			t.Items = append(t.Items, it)
 		}
@@ -236,6 +281,54 @@ func (a *App) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.JSON(w, http.StatusOK, t)
+}
+
+// setTransactionStatus is shared by Refund/Void — both just change a sale's
+// bookkeeping status; every revenue report already filters on
+// status='completed', so this alone corrects reporting. No payment gateway
+// call is made (POS sales here are settled via a physical card terminal or
+// cash, not through this app), so "refund"/"void" record what already
+// happened at the register.
+func (a *App) setTransactionStatus(w http.ResponseWriter, r *http.Request, newStatus, action string) {
+	claims := claimsFrom(r)
+	id, err := pathID(r, "id")
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	a.Decode(r, &body) // optional body — ignore decode errors (empty body is fine)
+
+	var currentStatus string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT status FROM transactions WHERE id=? AND salon_id=?`, id, claims.SalonID).Scan(&currentStatus); err != nil {
+		a.Error(w, http.StatusNotFound, "transaction not found")
+		return
+	}
+	if currentStatus != "completed" {
+		a.Error(w, http.StatusConflict, "this sale is already "+currentStatus)
+		return
+	}
+
+	if _, err := a.DB.ExecContext(r.Context(),
+		`UPDATE transactions SET status=? WHERE id=? AND salon_id=?`, newStatus, id, claims.SalonID); err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	a.logActivity(r.Context(), claims.SalonID, claims.UserID, action, "transaction", uint(id), map[string]any{"reason": body.Reason})
+	a.JSON(w, http.StatusOK, map[string]any{"status": newStatus})
+}
+
+// RefundTransaction POST /api/transactions/{id}/refund
+func (a *App) RefundTransaction(w http.ResponseWriter, r *http.Request) {
+	a.setTransactionStatus(w, r, "refunded", "transaction_refunded")
+}
+
+// VoidTransaction POST /api/transactions/{id}/void
+func (a *App) VoidTransaction(w http.ResponseWriter, r *http.Request) {
+	a.setTransactionStatus(w, r, "void", "transaction_voided")
 }
 
 // SendPaymentLink POST /api/transactions/{id}/payment-link

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Pencil, Trash2, X, Search, Check,
   MoreHorizontal, Scissors, SlidersHorizontal,
-  ChevronDown, ArrowUpDown
+  ChevronDown, ArrowUpDown, EyeOff, Eye, Power,
 } from 'lucide-react'
 import api from '@/lib/api'
 
@@ -14,11 +14,6 @@ const PRESET_COLORS = [
   '#EF4444', '#10B981', '#F97316', '#6366F1', '#14B8A6',
 ]
 
-const TREATMENT_TYPES = [
-  'Hair Color', 'Haircut & Styling', 'Hair Treatment',
-  'Nail Care', 'Facial', 'Massage', 'Waxing',
-  'Eyebrows & Lashes', 'Makeup', 'Other',
-]
 
 const DURATION_OPTIONS = [
   5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60,
@@ -26,9 +21,9 @@ const DURATION_OPTIONS = [
 ]
 
 const BLANK = {
-  name: '', category_id: '', treatment_type: '', description: '',
+  name: '', category_id: '', description: '',
   price_type: 'fixed', price: '', duration_min: 60,
-  deposit_amt: '', gender: 'any',
+  deposit_amt: '', gender: 'any', staff_ids: [],
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -64,22 +59,28 @@ export default function Services() {
   const [showAddCat,    setShowAddCat]    = useState(false)
   const [editingCat,    setEditingCat]    = useState(null)
   const [openMenuId,    setOpenMenuId]    = useState(null)
+  const [showInactive,  setShowInactive]  = useState(false)
 
   const { data: services   = [] } = useQuery({ queryKey: ['services'],   queryFn: () => api.get('/services').then(r => r.data)   })
   const { data: categories = [] } = useQuery({ queryKey: ['categories'], queryFn: () => api.get('/categories').then(r => r.data) })
+  const { data: staffList  = [] } = useQuery({ queryKey: ['staff'],      queryFn: () => api.get('/staff').then(r => r.data)      })
 
-  const deleteSvc = useMutation({
-    mutationFn: id => api.delete(`/services/${id}`),
+  const toggleSvc = useMutation({
+    mutationFn: id => api.patch(`/services/${id}/toggle`),
     onSuccess:  ()  => qc.invalidateQueries({ queryKey: ['services'] }),
   })
 
-  const active = services.filter(s => s.is_active)
+  const inactiveCount = services.filter(s => !s.is_active).length
+  const active = showInactive ? services : services.filter(s => s.is_active)
 
   const filtered = active.filter(s => {
     const q = search.toLowerCase()
     return (!q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
       && (selectedCatId === null || s.category_id === selectedCatId)
   })
+
+  const openCreate = () => setSlideOver({ mode: 'create', service: { ...BLANK } })
+  const openEdit   = s  => setSlideOver({ mode: 'edit',   service: { ...BLANK, ...s, price_type: s.price_type || 'fixed' } })
 
   const catById = Object.fromEntries(categories.map(c => [c.id, c]))
 
@@ -100,9 +101,6 @@ export default function Services() {
     return () => document.removeEventListener('click', fn)
   }, [])
 
-  const openCreate = () => setSlideOver({ mode: 'create', service: { ...BLANK } })
-  const openEdit   = s  => setSlideOver({ mode: 'edit',   service: { ...BLANK, ...s, price_type: s.price_type || 'fixed' } })
-
   return (
     <div className="min-h-full bg-white">
 
@@ -115,6 +113,19 @@ export default function Services() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-6">
+          {inactiveCount > 0 && (
+            <button
+              onClick={() => setShowInactive(v => !v)}
+              className={`flex items-center gap-1.5 px-4 py-2 border rounded-xl text-[13.5px] font-medium transition-colors ${
+                showInactive
+                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                  : 'border-slate-300 text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              {showInactive ? <Eye size={14} /> : <EyeOff size={14} />}
+              {showInactive ? 'Hide inactive' : `Show inactive (${inactiveCount})`}
+            </button>
+          )}
           <button className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 rounded-xl text-[13.5px] font-medium text-slate-700 hover:bg-slate-50 transition-colors">
             Options <ChevronDown size={14} className="text-slate-400" />
           </button>
@@ -240,6 +251,7 @@ export default function Services() {
                 setOpenMenuId={setOpenMenuId}
                 onEdit={openEdit}
                 onDelete={id => deleteSvc.mutate(id)}
+                onToggle={id => toggleSvc.mutate(id)}
               />
             ))
           )}
@@ -250,6 +262,7 @@ export default function Services() {
       <ServiceSlideOver
         slideOver={slideOver}
         categories={categories}
+        staffList={staffList}
         onClose={() => setSlideOver(null)}
         onSaved={() => { qc.invalidateQueries({ queryKey: ['services'] }); setSlideOver(null) }}
       />
@@ -293,7 +306,7 @@ function CatRow({ label, count, active, onClick, onEdit, onDelete }) {
 
 // ── Service Group (category section) ──────────────────────────────────────
 
-function ServiceGroup({ cat, items, openMenuId, setOpenMenuId, onEdit, onDelete }) {
+function ServiceGroup({ cat, items, openMenuId, setOpenMenuId, onEdit, onDelete, onToggle }) {
   const label = cat?.name || 'Uncategorized'
   const color = cat?.color || '#0D9488'
   const [menuOpen, setMenuOpen] = useState(false)
@@ -339,6 +352,7 @@ function ServiceGroup({ cat, items, openMenuId, setOpenMenuId, onEdit, onDelete 
             onMenuToggle={e => { e.stopPropagation(); setOpenMenuId(openMenuId === s.id ? null : s.id) }}
             onEdit={() => { setOpenMenuId(null); onEdit(s) }}
             onDelete={() => { setOpenMenuId(null); onDelete(s.id) }}
+            onToggle={() => { setOpenMenuId(null); onToggle(s.id) }}
           />
         ))}
       </div>
@@ -348,17 +362,27 @@ function ServiceGroup({ cat, items, openMenuId, setOpenMenuId, onEdit, onDelete 
 
 // ── Service Row ────────────────────────────────────────────────────────────
 
-function ServiceRow({ service: s, accentColor, isLast, menuOpen, onMenuToggle, onEdit, onDelete }) {
+function ServiceRow({ service: s, accentColor, isLast, menuOpen, onMenuToggle, onEdit, onDelete, onToggle }) {
   return (
-    <div className={`flex items-stretch bg-white hover:bg-slate-50 transition-colors ${!isLast ? 'border-b border-slate-100' : ''}`}>
+    <div className={`flex items-stretch transition-colors ${!isLast ? 'border-b border-slate-100' : ''} ${s.is_active ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/60'}`}>
 
-      {/* Left accent bar — lighter shade */}
-      <div className="w-1 shrink-0" style={{ background: lighten(accentColor, 80) }} />
+      {/* Left accent bar */}
+      <div className="w-1 shrink-0" style={{ background: s.is_active ? lighten(accentColor, 80) : '#e2e8f0' }} />
 
       {/* Content */}
       <div className="flex-1 flex items-center px-4 py-3.5 gap-4 min-w-0">
         <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-semibold text-slate-900 leading-snug">{s.name}</p>
+          <div className="flex items-center gap-2">
+            <p className={`text-[14px] font-semibold leading-snug ${s.is_active ? 'text-slate-900' : 'text-slate-400'}`}>{s.name}</p>
+            {!s.is_active && (
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 text-slate-500 uppercase tracking-wide">Inactive</span>
+            )}
+            {s.gender && s.gender !== 'any' && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-slate-100 text-slate-500 capitalize">
+                {s.gender === 'female' ? 'Women' : 'Men'}
+              </span>
+            )}
+          </div>
           <p className="text-[12.5px] text-slate-500 mt-0.5">{fmtDuration(s.duration_min)}</p>
           {s.description && (
             <p className="text-[12.5px] text-slate-400 mt-0.5 truncate">{s.description}</p>
@@ -367,7 +391,7 @@ function ServiceRow({ service: s, accentColor, isLast, menuOpen, onMenuToggle, o
 
         {/* Price */}
         <div className="shrink-0 text-right">
-          <span className={`text-[14px] font-semibold ${s.price_type === 'free' ? 'text-slate-400' : 'text-slate-900'}`}>
+          <span className={`text-[14px] font-semibold ${!s.is_active || s.price_type === 'free' ? 'text-slate-400' : 'text-slate-900'}`}>
             {fmtPrice(s)}
           </span>
         </div>
@@ -382,13 +406,22 @@ function ServiceRow({ service: s, accentColor, isLast, menuOpen, onMenuToggle, o
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-9 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-100 z-30 py-1 w-36">
-              <button onClick={onEdit}   className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-slate-700 hover:bg-slate-50 transition-colors">
-                <Pencil size={13} className="text-slate-400" /> Edit
+            <div className="absolute right-0 top-9 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-100 z-30 py-1 w-40">
+              {s.is_active && (
+                <button onClick={onEdit} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-slate-700 hover:bg-slate-50 transition-colors">
+                  <Pencil size={13} className="text-slate-400" /> Edit
+                </button>
+              )}
+              <button onClick={onToggle} className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] transition-colors ${
+                s.is_active ? 'text-orange-600 hover:bg-orange-50' : 'text-teal-600 hover:bg-teal-50'
+              }`}>
+                <Power size={13} /> {s.is_active ? 'Deactivate' : 'Activate'}
               </button>
-              <button onClick={onDelete} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors">
-                <Trash2 size={13} /> Delete
-              </button>
+              {s.is_active && (
+                <button onClick={onDelete} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors">
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -462,15 +495,44 @@ function InlineCatForm({ initial, onSave, onCancel }) {
 
 const inp = 'w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-[13.5px] outline-none focus:border-[#0D9488] focus:ring-2 focus:ring-[#CCFBF1] transition-all bg-white placeholder:text-slate-300'
 
-function ServiceSlideOver({ slideOver, categories, onClose, onSaved }) {
+function ServiceSlideOver({ slideOver, categories, staffList, onClose, onSaved }) {
+  const qc = useQueryClient()
   const isOpen = !!slideOver
   const isEdit = slideOver?.mode === 'edit'
+  const serviceId = slideOver?.service?.id
   const [form,   setForm]   = useState({ ...BLANK })
   const [saving, setSaving] = useState(false)
+  const [newAddon, setNewAddon] = useState({ name: '', price: '', duration_min: '' })
+  const [addingAddon, setAddingAddon] = useState(false)
+
+  const { data: addons = [], refetch: refetchAddons } = useQuery({
+    queryKey: ['addons', serviceId],
+    queryFn: () => api.get(`/services/${serviceId}/addons`).then(r => r.data),
+    enabled: isEdit && !!serviceId,
+  })
 
   useEffect(() => {
     if (slideOver) setForm({ ...BLANK, ...slideOver.service })
+    setNewAddon({ name: '', price: '', duration_min: '' })
+    setAddingAddon(false)
   }, [slideOver])
+
+  async function saveAddon() {
+    if (!newAddon.name) return
+    await api.post(`/services/${serviceId}/addons`, {
+      name: newAddon.name,
+      price: parseFloat(newAddon.price) || 0,
+      duration_min: parseInt(newAddon.duration_min) || 0,
+    })
+    setNewAddon({ name: '', price: '', duration_min: '' })
+    setAddingAddon(false)
+    refetchAddons()
+  }
+
+  async function removeAddon(addonId) {
+    await api.delete(`/services/${serviceId}/addons/${addonId}`)
+    refetchAddons()
+  }
 
   const set  = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
   const setV = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -489,6 +551,7 @@ function ServiceSlideOver({ slideOver, categories, onClose, onSaved }) {
         gender:       form.gender,
         price_type:   form.price_type,
         is_active:    true,
+        staff_ids:    form.staff_ids,
       }
       if (isEdit) await api.put(`/services/${slideOver.service.id}`, payload)
       else        await api.post('/services', payload)
@@ -514,20 +577,12 @@ function ServiceSlideOver({ slideOver, categories, onClose, onSaved }) {
             <input required value={form.name} onChange={set('name')} className={inp} placeholder="e.g. Balayage" />
           </Field>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Menu category">
-              <select value={form.category_id} onChange={set('category_id')} className={inp}>
-                <option value="">No category</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Treatment type">
-              <select value={form.treatment_type} onChange={set('treatment_type')} className={inp}>
-                <option value="">Select…</option>
-                {TREATMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </Field>
-          </div>
+          <Field label="Menu category">
+            <select value={form.category_id} onChange={set('category_id')} className={inp}>
+              <option value="">No category</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
 
           <Field label="Description">
             <textarea value={form.description} onChange={set('description')} rows={3} className={inp + ' resize-none'} placeholder="Brief description…" />
@@ -566,6 +621,110 @@ function ServiceSlideOver({ slideOver, categories, onClose, onSaved }) {
               </Field>
             </div>
           </div>
+
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4">Team</p>
+
+            <Field label="Who can perform this service">
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setV('staff_ids', [])}
+                  className={`flex-1 py-2.5 rounded-xl text-[13px] font-semibold border-2 transition-all ${
+                    form.staff_ids.length === 0 ? 'border-[#0D9488] bg-[#F0FDFA] text-[#0D9488]' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Any team member
+                </button>
+                <button type="button" onClick={() => setV('staff_ids', form.staff_ids.length === 0 ? staffList.map(s => s.id) : form.staff_ids)}
+                  className={`flex-1 py-2.5 rounded-xl text-[13px] font-semibold border-2 transition-all ${
+                    form.staff_ids.length > 0 ? 'border-[#0D9488] bg-[#F0FDFA] text-[#0D9488]' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Specific team members
+                </button>
+              </div>
+            </Field>
+
+            {form.staff_ids.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {staffList.map(s => {
+                  const name = `${s.first_name} ${s.last_name}`.trim()
+                  const selected = form.staff_ids.includes(s.id)
+                  return (
+                    <button key={s.id} type="button"
+                      onClick={() => setV('staff_ids', selected
+                        ? form.staff_ids.filter(id => id !== s.id)
+                        : [...form.staff_ids, s.id])}
+                      className={`px-3.5 py-2 rounded-full text-[12.5px] font-semibold border-2 transition-all ${
+                        selected ? 'border-[#0D9488] bg-[#F0FDFA] text-[#0D9488]' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  )
+                })}
+                {staffList.length === 0 && (
+                  <p className="text-[12.5px] text-slate-400">No team members yet — add one under Team.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {isEdit && (
+            <div className="border-t border-slate-100 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Add-ons</p>
+                <button type="button" onClick={() => setAddingAddon(v => !v)}
+                  className="flex items-center gap-1 text-[12px] text-teal-600 font-semibold hover:text-teal-800">
+                  <Plus size={12} /> Add
+                </button>
+              </div>
+
+              {addingAddon && (
+                <div className="mb-3 p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <input value={newAddon.name} onChange={e => setNewAddon(p => ({ ...p, name: e.target.value }))}
+                    placeholder="Add-on name (e.g. Toner)" className={inp + ' text-[13px]'} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[13px]">$</span>
+                      <input type="number" min="0" step="0.01" value={newAddon.price}
+                        onChange={e => setNewAddon(p => ({ ...p, price: e.target.value }))}
+                        placeholder="0.00" className={inp + ' pl-6 text-[13px]'} />
+                    </div>
+                    <input type="number" min="0" value={newAddon.duration_min}
+                      onChange={e => setNewAddon(p => ({ ...p, duration_min: e.target.value }))}
+                      placeholder="Extra mins" className={inp + ' text-[13px]'} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setAddingAddon(false)}
+                      className="flex-1 py-1.5 text-[12px] border border-slate-200 rounded-lg text-slate-500">Cancel</button>
+                    <button type="button" onClick={saveAddon} disabled={!newAddon.name}
+                      className="flex-1 py-1.5 text-[12px] rounded-lg bg-teal-600 text-white font-semibold disabled:opacity-50">Save</button>
+                  </div>
+                </div>
+              )}
+
+              {addons.length === 0 && !addingAddon && (
+                <p className="text-[12.5px] text-slate-400 py-2">No add-ons yet</p>
+              )}
+              <div className="space-y-1.5">
+                {addons.map(a => (
+                  <div key={a.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                    <div>
+                      <span className="text-[13px] font-medium text-slate-700">{a.name}</span>
+                      <span className="ml-2 text-[12px] text-slate-400">
+                        {a.price > 0 ? `+$${a.price.toFixed(0)}` : 'Free'}
+                        {a.duration_min > 0 ? ` · +${a.duration_min}m` : ''}
+                      </span>
+                    </div>
+                    <button type="button" onClick={() => removeAddon(a.id)}
+                      className="text-slate-400 hover:text-red-500 transition-colors p-1">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-slate-100 pt-4">
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4">Additional options</p>

@@ -30,18 +30,46 @@ type membershipPlan struct {
 }
 
 type clientMembership struct {
-	ID             uint      `json:"id"`
-	SalonID        uint      `json:"salon_id"`
-	ClientID       uint      `json:"client_id"`
-	PlanID         uint      `json:"plan_id"`
-	PlanName       string    `json:"plan_name"`
-	Price          float64   `json:"price"`
-	BillingCycle   string    `json:"billing_cycle"`
-	DiscountPct    float64   `json:"discount_pct"`
-	Status         string    `json:"status"`
-	StartDate      string    `json:"start_date"`
-	NextBillingDate string   `json:"next_billing_date"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              uint      `json:"id"`
+	SalonID         uint      `json:"salon_id"`
+	ClientID        uint      `json:"client_id"`
+	PlanID          uint      `json:"plan_id"`
+	PlanName        string    `json:"plan_name"`
+	Price           float64   `json:"price"`
+	BillingCycle    string    `json:"billing_cycle"`
+	DiscountPct     float64   `json:"discount_pct"`
+	Status          string    `json:"status"`
+	StartDate       string    `json:"start_date"`
+	NextBillingDate string    `json:"next_billing_date"`
+	ExpiresAt       string    `json:"expires_at"`
+	DaysLeft        int       `json:"days_left"`
+	VisitCount      int       `json:"visit_count"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// membershipDaysLeft computes days remaining and auto-expires if past.
+// Returns -1 if no expiry is set.
+func membershipDaysLeft(expiresStr string) int {
+	if expiresStr == "" {
+		return -1
+	}
+	exp, err := time.Parse("2006-01-02", expiresStr)
+	if err != nil {
+		return -1
+	}
+	return int(time.Until(exp).Hours() / 24)
+}
+
+// addMembershipCycle adds one billing cycle to a date.
+func addMembershipCycle(t time.Time, cycle string) time.Time {
+	switch cycle {
+	case "quarterly":
+		return t.AddDate(0, 3, 0)
+	case "annual":
+		return t.AddDate(1, 0, 0)
+	default: // monthly
+		return t.AddDate(0, 1, 0)
+	}
 }
 
 func (a *App) ListMembershipPlans(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +283,12 @@ func (a *App) GetClientMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-expire any memberships whose expires_at has passed
+	a.DB.ExecContext(r.Context(),
+		`UPDATE client_memberships SET status='cancelled'
+		 WHERE client_id=? AND salon_id=? AND status='active' AND expires_at IS NOT NULL AND expires_at < CURDATE()`,
+		clientID, claims.SalonID)
+
 	var cm clientMembership
 	err = a.DB.QueryRowContext(r.Context(),
 		`SELECT cm.id, cm.salon_id, cm.client_id, cm.plan_id,
@@ -262,14 +296,20 @@ func (a *App) GetClientMembership(w http.ResponseWriter, r *http.Request) {
 		        cm.status,
 		        DATE_FORMAT(cm.start_date, '%Y-%m-%d'),
 		        COALESCE(DATE_FORMAT(cm.next_billing_date, '%Y-%m-%d'),''),
-		        cm.created_at
+		        COALESCE(DATE_FORMAT(cm.expires_at, '%Y-%m-%d'),''),
+		        cm.created_at,
+		        (SELECT COUNT(*) FROM transactions t
+		         WHERE t.client_id=cm.client_id AND t.salon_id=cm.salon_id
+		           AND DATE(t.created_at) >= cm.start_date
+		           AND t.discount > 0) as visit_count
 		 FROM client_memberships cm
 		 JOIN membership_plans mp ON mp.id = cm.plan_id
 		 WHERE cm.client_id=? AND cm.salon_id=? AND cm.status='active'
 		 ORDER BY cm.created_at DESC LIMIT 1`, clientID, claims.SalonID).
 		Scan(&cm.ID, &cm.SalonID, &cm.ClientID, &cm.PlanID,
 			&cm.PlanName, &cm.Price, &cm.BillingCycle, &cm.DiscountPct,
-			&cm.Status, &cm.StartDate, &cm.NextBillingDate, &cm.CreatedAt)
+			&cm.Status, &cm.StartDate, &cm.NextBillingDate, &cm.ExpiresAt,
+			&cm.CreatedAt, &cm.VisitCount)
 	if err == sql.ErrNoRows {
 		a.JSON(w, http.StatusOK, nil)
 		return
@@ -277,6 +317,11 @@ func (a *App) GetClientMembership(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
+	}
+	cm.DaysLeft = membershipDaysLeft(cm.ExpiresAt)
+	// Fall back to next_billing_date if no explicit expires_at
+	if cm.DaysLeft < 0 && cm.NextBillingDate != "" {
+		cm.DaysLeft = membershipDaysLeft(cm.NextBillingDate)
 	}
 	a.JSON(w, http.StatusOK, cm)
 }
@@ -296,9 +341,19 @@ func (a *App) AssignMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch billing_cycle so we can compute exact expiry
+	var billingCycle string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT billing_cycle FROM membership_plans WHERE id=? AND salon_id=?`,
+		body.PlanID, claims.SalonID).Scan(&billingCycle); err != nil {
+		billingCycle = "monthly"
+	}
+
 	today := time.Now().UTC()
 	startDate := today.Format("2006-01-02")
-	nextBilling := today.AddDate(0, 1, 0).Format("2006-01-02")
+	nextBillingT := addMembershipCycle(today, billingCycle)
+	nextBilling := nextBillingT.Format("2006-01-02")
+	expiresAt := nextBilling // expires at end of first billing period
 
 	// Cancel any existing active membership for this client
 	a.DB.ExecContext(r.Context(),
@@ -307,14 +362,15 @@ func (a *App) AssignMembership(w http.ResponseWriter, r *http.Request) {
 		clientID, claims.SalonID)
 
 	res, err := a.DB.ExecContext(r.Context(),
-		`INSERT INTO client_memberships (salon_id, client_id, plan_id, status, start_date, next_billing_date)
-		 VALUES (?,?,?,'active',?,?)`,
-		claims.SalonID, clientID, body.PlanID, startDate, nextBilling)
+		`INSERT INTO client_memberships (salon_id, client_id, plan_id, status, start_date, next_billing_date, expires_at)
+		 VALUES (?,?,?,'active',?,?,?)`,
+		claims.SalonID, clientID, body.PlanID, startDate, nextBilling, expiresAt)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
 	}
 	id, _ := res.LastInsertId()
+	daysLeft := membershipDaysLeft(expiresAt)
 	a.JSON(w, http.StatusCreated, map[string]any{
 		"id":                id,
 		"client_id":         clientID,
@@ -322,6 +378,8 @@ func (a *App) AssignMembership(w http.ResponseWriter, r *http.Request) {
 		"status":            "active",
 		"start_date":        startDate,
 		"next_billing_date": nextBilling,
+		"expires_at":        expiresAt,
+		"days_left":         daysLeft,
 	})
 }
 
@@ -339,10 +397,20 @@ type activeMembership struct {
 	Status          string  `json:"status"`
 	StartDate       string  `json:"start_date"`
 	NextBillingDate string  `json:"next_billing_date"`
+	ExpiresAt       string  `json:"expires_at"`
+	DaysLeft        int     `json:"days_left"`
+	VisitCount      int     `json:"visit_count"`
 }
 
 func (a *App) ListClientMemberships(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
+
+	// Batch-expire any overdue memberships first
+	a.DB.ExecContext(r.Context(),
+		`UPDATE client_memberships SET status='cancelled'
+		 WHERE salon_id=? AND status='active' AND expires_at IS NOT NULL AND expires_at < CURDATE()`,
+		claims.SalonID)
+
 	rows, err := a.DB.QueryContext(r.Context(), `
 		SELECT cm.id, cm.client_id,
 		       CONCAT(c.first_name, ' ', c.last_name) as client_name,
@@ -351,7 +419,12 @@ func (a *App) ListClientMemberships(w http.ResponseWriter, r *http.Request) {
 		       mp.price, mp.billing_cycle,
 		       cm.status,
 		       DATE_FORMAT(cm.start_date, '%Y-%m-%d'),
-		       COALESCE(DATE_FORMAT(cm.next_billing_date, '%Y-%m-%d'),'')
+		       COALESCE(DATE_FORMAT(cm.next_billing_date, '%Y-%m-%d'),''),
+		       COALESCE(DATE_FORMAT(cm.expires_at, '%Y-%m-%d'),''),
+		       (SELECT COUNT(*) FROM transactions t
+		        WHERE t.client_id=cm.client_id AND t.salon_id=cm.salon_id
+		          AND DATE(t.created_at) >= cm.start_date
+		          AND t.discount > 0) as visit_count
 		FROM client_memberships cm
 		JOIN membership_plans mp ON mp.id = cm.plan_id
 		JOIN clients c ON c.id = cm.client_id
@@ -372,7 +445,11 @@ func (a *App) ListClientMemberships(w http.ResponseWriter, r *http.Request) {
 		var m activeMembership
 		rows.Scan(&m.ID, &m.ClientID, &m.ClientName, &m.ClientPhone,
 			&m.PlanID, &m.PlanName, &m.Price, &m.BillingCycle,
-			&m.Status, &m.StartDate, &m.NextBillingDate)
+			&m.Status, &m.StartDate, &m.NextBillingDate, &m.ExpiresAt, &m.VisitCount)
+		m.DaysLeft = membershipDaysLeft(m.ExpiresAt)
+		if m.DaysLeft < 0 && m.NextBillingDate != "" {
+			m.DaysLeft = membershipDaysLeft(m.NextBillingDate)
+		}
 		memberships = append(memberships, m)
 
 		if m.Status == "active" {
@@ -433,4 +510,62 @@ func (a *App) UpdateMembershipStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.JSON(w, http.StatusOK, map[string]any{"status": body.Status})
+}
+
+// POST /api/v1/clients/{id}/membership/renew
+// Extends the membership by one billing cycle — updates next_billing_date and expires_at.
+func (a *App) RenewMembership(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	clientID, err := pathID(r, "id")
+	if err != nil {
+		a.Error(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	// Fetch current membership
+	var cmID uint
+	var billingCycle, nextBillingStr, expiresStr string
+	err = a.DB.QueryRowContext(r.Context(),
+		`SELECT cm.id, mp.billing_cycle,
+		        COALESCE(DATE_FORMAT(cm.next_billing_date,'%Y-%m-%d'),''),
+		        COALESCE(DATE_FORMAT(cm.expires_at,'%Y-%m-%d'),'')
+		 FROM client_memberships cm
+		 JOIN membership_plans mp ON mp.id=cm.plan_id
+		 WHERE cm.client_id=? AND cm.salon_id=? AND cm.status IN ('active','paused','cancelled')
+		 ORDER BY cm.created_at DESC LIMIT 1`,
+		clientID, claims.SalonID).Scan(&cmID, &billingCycle, &nextBillingStr, &expiresStr)
+	if err == sql.ErrNoRows {
+		a.Error(w, http.StatusNotFound, "no membership found")
+		return
+	}
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+
+	// Advance by one cycle from today (or from current expiry if still in future)
+	base := time.Now().UTC()
+	if expiresStr != "" {
+		if exp, parseErr := time.Parse("2006-01-02", expiresStr); parseErr == nil && exp.After(base) {
+			base = exp
+		}
+	}
+	newExpiry := addMembershipCycle(base, billingCycle)
+	newNextBilling := newExpiry
+
+	_, err = a.DB.ExecContext(r.Context(),
+		`UPDATE client_memberships SET status='active', next_billing_date=?, expires_at=? WHERE id=?`,
+		newNextBilling.Format("2006-01-02"), newExpiry.Format("2006-01-02"), cmID)
+	if err != nil {
+		a.Error(w, http.StatusInternalServerError, "db error")
+		return
+	}
+
+	daysLeft := int(time.Until(newExpiry).Hours() / 24)
+	a.JSON(w, http.StatusOK, map[string]any{
+		"renewed":           true,
+		"next_billing_date": newNextBilling.Format("2006-01-02"),
+		"expires_at":        newExpiry.Format("2006-01-02"),
+		"days_left":         daysLeft,
+	})
 }
