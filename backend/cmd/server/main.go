@@ -83,6 +83,9 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"salonos"}`))
 	})
 
+	// WhatsApp click-tracking redirect (public — no auth)
+	mux.HandleFunc("GET /t/{token}", app.TrackRedirect)
+
 	// ── Auth routes (no auth required) ───────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/login", app.Login)
 	mux.HandleFunc("POST /api/v1/auth/register", app.Register)
@@ -291,6 +294,8 @@ func main() {
 	mux.Handle("DELETE /api/v1/upsells/{id}", auth(middleware.RequireRole("owner", "manager")(http.HandlerFunc(app.DeleteUpsell))))
 
 	// Marketing
+	mux.Handle("GET /api/v1/whatsapp/performance", auth(http.HandlerFunc(app.WhatsAppPerformance)))
+
 	mux.Handle("GET /api/v1/marketing/campaigns", auth(http.HandlerFunc(app.ListCampaigns)))
 	mux.Handle("POST /api/v1/marketing/campaigns", auth(middleware.RequireRole("owner", "manager")(http.HandlerFunc(app.CreateCampaign))))
 	mux.Handle("GET /api/v1/marketing/segments/{segment}/count", auth(http.HandlerFunc(app.GetSegmentCount)))

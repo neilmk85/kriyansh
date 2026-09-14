@@ -275,8 +275,9 @@ func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Notify client of booking confirmation in background
+	// Notify client of booking confirmation + attribute any prior WA click
 	go a.notifyAppointmentBooked(context.Background(), apptID, req.ClientID)
+	go a.recordConversion(context.Background(), uint(req.ClientID), "booking", apptID, 0)
 
 	a.JSON(w, http.StatusCreated, map[string]any{
 		"id":      apptID,
@@ -336,6 +337,7 @@ func (a *App) RescheduleAppointment(w http.ResponseWriter, r *http.Request) {
 	a.logActivity(r.Context(), claims.SalonID, claims.UserID, "rescheduled", "appointment", uint(id), map[string]any{
 		"start_at": body.StartAt, "staff_id": body.StaffID,
 	})
+	go a.notifyAppointmentRescheduled(context.Background(), int64(id), body.StartAt)
 	a.JSON(w, http.StatusOK, map[string]any{"rescheduled": true})
 }
 
@@ -426,8 +428,8 @@ func (a *App) CancelAppointment(w http.ResponseWriter, r *http.Request) {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	// Trigger gap-fill in background — notifies waitlist/at-risk clients
 	go a.TriggerGapFill(context.Background(), claims.SalonID, id)
+	go a.notifyAppointmentCancelled(context.Background(), int64(id))
 	a.JSON(w, http.StatusOK, map[string]any{"cancelled": true})
 }
 
@@ -762,4 +764,42 @@ func notifyApptInfo(clientName, phone, email, serviceName, staffName string, sta
 		StaffName:   staffName,
 		StartAt:     startAt,
 	}
+}
+
+func (a *App) notifyAppointmentCancelled(ctx context.Context, apptID int64) {
+	var info struct{ clientName, phone, email, serviceName, staffName string; startAt time.Time }
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT c.first_name, COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),'Appointment'),
+		       COALESCE(CONCAT(u.first_name,' ',u.last_name),''), a.start_at
+		FROM appointments a
+		JOIN clients c ON c.id = a.client_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
+		LEFT JOIN services s ON s.id = aps.service_id
+		LEFT JOIN staff_profiles sp ON sp.id = a.staff_id
+		LEFT JOIN users u ON u.id = sp.user_id
+		WHERE a.id = ?
+		GROUP BY c.first_name, c.phone, c.email, u.first_name, u.last_name, a.start_at`, apptID,
+	).Scan(&info.clientName, &info.phone, &info.email, &info.serviceName, &info.staffName, &info.startAt)
+	if err != nil || info.phone == "" { return }
+	a.Notifier.NotifyAppointmentCancelled(notifyApptInfo(info.clientName, info.phone, info.email, info.serviceName, info.staffName, info.startAt))
+}
+
+func (a *App) notifyAppointmentRescheduled(ctx context.Context, apptID int64, newStartAt time.Time) {
+	var info struct{ clientName, phone, email, serviceName, staffName string }
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT c.first_name, COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),'Appointment'),
+		       COALESCE(CONCAT(u.first_name,' ',u.last_name),'')
+		FROM appointments a
+		JOIN clients c ON c.id = a.client_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
+		LEFT JOIN services s ON s.id = aps.service_id
+		LEFT JOIN staff_profiles sp ON sp.id = a.staff_id
+		LEFT JOIN users u ON u.id = sp.user_id
+		WHERE a.id = ?
+		GROUP BY c.first_name, c.phone, c.email, u.first_name, u.last_name`, apptID,
+	).Scan(&info.clientName, &info.phone, &info.email, &info.serviceName, &info.staffName)
+	if err != nil || info.phone == "" { return }
+	a.Notifier.NotifyAppointmentRescheduled(notifyApptInfo(info.clientName, info.phone, info.email, info.serviceName, info.staffName, newStartAt))
 }

@@ -57,12 +57,13 @@ func (n *Notifier) SendEmail(to, toName, subject, html, text string) {
 // ── Structured event notifications ───────────────────────────────────────────
 
 type ApptInfo struct {
-	ClientName string
-	Phone      string
-	Email      string
+	ClientName  string
+	Phone       string
+	Email       string
 	ServiceName string
-	StaffName  string
-	StartAt    time.Time
+	StaffName   string
+	StartAt     time.Time
+	BookingURL  string // optional — tracked CTA link appended to WhatsApp
 }
 
 type TxnInfo struct {
@@ -71,6 +72,7 @@ type TxnInfo struct {
 	Email       string
 	GrandTotal  float64
 	ServiceName string // first line item name
+	BookingURL  string // optional
 }
 
 type ExpiryInfo struct {
@@ -79,6 +81,168 @@ type ExpiryInfo struct {
 	Email      string
 	ItemName   string // plan name or package name
 	ExpiresAt  time.Time
+	BookingURL string // optional
+}
+
+type RetentionInfo struct {
+	ClientName  string
+	Phone       string
+	Email       string
+	ServiceName string // last service, if known
+	DaysSince   int    // days since last visit
+	BookingURL  string
+}
+
+// NotifyAppointmentCancelled fires when an appointment is cancelled.
+func (n *Notifier) NotifyAppointmentCancelled(info ApptInfo) {
+	dateStr := info.StartAt.Local().Format("Mon, Jan 2 at 3:04 PM")
+	sms := fmt.Sprintf(
+		"Hi %s! Your appointment at %s on %s has been cancelled. To rebook, call us or use the app.",
+		info.ClientName, n.cfg.SalonName, dateStr,
+	)
+	wa := fmt.Sprintf(
+		"*Appointment Cancelled* ❌\n\nHi %s,\n\nYour appointment on *%s* at *%s* has been cancelled.\n\n",
+		info.ClientName, dateStr, n.cfg.SalonName,
+	)
+	if info.BookingURL != "" {
+		wa += "Ready to rebook? We'd love to see you again 💜\n👉 " + info.BookingURL
+	} else {
+		wa += "Give us a call or visit the app to rebook. We'd love to see you again! 💜"
+	}
+	email := appointmentEmailHTML("Appointment Cancelled", info.ClientName, n.cfg.SalonName,
+		fmt.Sprintf("Your appointment on <strong>%s</strong> has been cancelled.", dateStr),
+		"We'd love to see you again — book a new appointment anytime!")
+	n.dispatch(info.Phone, info.Email, info.ClientName, "Appointment Cancelled", sms, wa, email)
+}
+
+// NotifyAppointmentRescheduled fires when an appointment is moved to a new time.
+func (n *Notifier) NotifyAppointmentRescheduled(info ApptInfo) {
+	dateStr := info.StartAt.Local().Format("Mon, Jan 2 at 3:04 PM")
+	sms := fmt.Sprintf(
+		"Hi %s! Your appointment at %s has been rescheduled to %s with %s. See you then! 💇",
+		info.ClientName, n.cfg.SalonName, dateStr, info.StaffName,
+	)
+	wa := fmt.Sprintf(
+		"*Appointment Rescheduled* 📅\n\nHi %s! Your appointment has been updated:\n\n"+
+			"📅 *New Date:* %s\n"+
+			"💆 *Service:* %s\n"+
+			"👤 *With:* %s\n"+
+			"📍 *%s*\n\n"+
+			"See you soon! 💜 Reply STOP to opt out.",
+		info.ClientName, dateStr, info.ServiceName, info.StaffName, n.cfg.SalonName,
+	)
+	email := appointmentEmailHTML("Appointment Rescheduled 📅", info.ClientName, n.cfg.SalonName,
+		fmt.Sprintf("Your appointment has been moved to <strong>%s</strong> with <strong>%s</strong>.", dateStr, info.StaffName),
+		"We look forward to seeing you!")
+	n.dispatch(info.Phone, info.Email, info.ClientName, "Appointment Rescheduled", sms, wa, email)
+}
+
+// NotifyRebookingReminder fires when a client hasn't rebooked after their last visit.
+func (n *Notifier) NotifyRebookingReminder(info RetentionInfo) {
+	sms := fmt.Sprintf(
+		"Hi %s! It's been a while since your last visit at %s. Ready to book your next appointment? Call us or use the app!",
+		info.ClientName, n.cfg.SalonName,
+	)
+	wa := fmt.Sprintf(
+		"*We Miss You!* 💜\n\nHi %s! It's been %d days since your last visit at *%s*.\n\n"+
+			"Time to treat yourself? Your next appointment is just a tap away 💆",
+		info.ClientName, info.DaysSince, n.cfg.SalonName,
+	)
+	if info.BookingURL != "" {
+		wa += "\n\n👉 Book now: " + info.BookingURL
+	}
+	email := retentionEmailHTML("We Miss You! 💜", info.ClientName, n.cfg.SalonName,
+		fmt.Sprintf("It's been <strong>%d days</strong> since your last visit. Time to treat yourself!", info.DaysSince),
+		info.BookingURL)
+	n.dispatch(info.Phone, info.Email, info.ClientName, "Time for your next visit", sms, wa, email)
+}
+
+// NotifyInactiveCustomer fires when a client hasn't visited in 60+ days.
+func (n *Notifier) NotifyInactiveCustomer(info RetentionInfo) {
+	sms := fmt.Sprintf(
+		"Hi %s! We haven't seen you at %s in a while and we miss you! Come back for a fresh look — book your appointment today.",
+		info.ClientName, n.cfg.SalonName,
+	)
+	wa := fmt.Sprintf(
+		"*Long Time No See!* 👋\n\nHi %s! We haven't seen you at *%s* in %d days and the whole team misses you!\n\n"+
+			"Come back for a fresh look — we have some amazing new services waiting for you 🌟",
+		info.ClientName, n.cfg.SalonName, info.DaysSince,
+	)
+	if info.BookingURL != "" {
+		wa += "\n\n👉 Book now: " + info.BookingURL
+	}
+	email := retentionEmailHTML("We Miss You! 👋", info.ClientName, n.cfg.SalonName,
+		fmt.Sprintf("We haven't seen you in <strong>%d days</strong>! Come back for a fresh look.", info.DaysSince),
+		info.BookingURL)
+	n.dispatch(info.Phone, info.Email, info.ClientName, "We haven't seen you in a while", sms, wa, email)
+}
+
+// NotifyPackageBalance fires after a session is redeemed to show remaining credits.
+func (n *Notifier) NotifyPackageBalance(clientName, phone, email, packageName string, remaining int, bookingURL string) {
+	var urgency string
+	if remaining == 0 {
+		urgency = "You've used all your sessions"
+	} else if remaining == 1 {
+		urgency = "You have *1 session remaining*"
+	} else {
+		urgency = fmt.Sprintf("You have *%d sessions remaining*", remaining)
+	}
+	sms := fmt.Sprintf("Hi %s! Session redeemed from your %s package at %s. %s sessions left.",
+		clientName, packageName, n.cfg.SalonName, func() string {
+			if remaining == 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", remaining)
+		}())
+	wa := fmt.Sprintf(
+		"*Package Update* 📦\n\nHi %s!\n\nA session from your *%s* package was just redeemed at *%s*.\n\n"+
+			"%s.\n",
+		clientName, packageName, n.cfg.SalonName, urgency,
+	)
+	if bookingURL != "" && remaining > 0 {
+		wa += "\n👉 Book your next session: " + bookingURL
+	} else if remaining == 0 {
+		wa += "\nReady to top up? Give us a call or visit the app 💜"
+	}
+	text := fmt.Sprintf("Hi %s,\n\nA session from your %s package was redeemed. %d sessions remaining.\n\nThank you, %s team.",
+		clientName, packageName, remaining, n.cfg.SalonName)
+	html := fmt.Sprintf(`<div style="font-family:sans-serif;max-width:500px;margin:auto">
+<div style="background:linear-gradient(135deg,#6366F1,#EC4899);padding:32px;border-radius:16px 16px 0 0;color:white">
+<h2 style="margin:0">Package Update 📦</h2></div>
+<div style="background:#fff;padding:32px;border:1px solid #E5E7EB;border-top:none;border-radius:0 0 16px 16px">
+<p>Hi <strong>%s</strong>,</p>
+<p>A session from your <strong>%s</strong> package was redeemed.</p>
+<p style="font-size:24px;font-weight:700;color:%s">%d sessions remaining</p>
+%s
+<p style="color:#6B7280;font-size:13px">With love, the <strong>%s</strong> team 🌸</p>
+</div></div>`,
+		clientName, packageName,
+		func() string {
+			if remaining <= 1 {
+				return "#DC2626"
+			}
+			return "#059669"
+		}(),
+		remaining,
+		func() string {
+			if bookingURL != "" && remaining > 0 {
+				return fmt.Sprintf(`<p><a href="%s" style="background:#6366F1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Book Next Session</a></p>`, bookingURL)
+			}
+			return ""
+		}(),
+		n.cfg.SalonName)
+	n.sendSMS(phone, sms)
+	if n.cfg.TwilioWAFrom != "" {
+		n.sendWhatsApp(phone, wa)
+	}
+	if email != "" {
+		n.sendEmail(email, clientName, fmt.Sprintf("Package Update — %s", n.cfg.SalonName), html, text)
+	}
+}
+
+// NotifyCampaign sends a marketing campaign message via WhatsApp.
+func (n *Notifier) NotifyCampaign(clientName, phone, message string) {
+	n.sendWhatsApp(phone, message)
 }
 
 // NotifyAppointmentBooked fires when an appointment is created by staff/kiosk.
@@ -389,6 +553,20 @@ func appointmentEmailHTML(title, clientName, salonName, detail, cta string) stri
 <p style="margin-top:32px;color:#6B7280;font-size:13px">With love, the <strong>%s</strong> team 🌸</p>
 </div>
 </div>`, title, clientName, detail, cta, salonName)
+}
+
+func retentionEmailHTML(title, clientName, salonName, detail, bookingURL string) string {
+	cta := ""
+	if bookingURL != "" {
+		cta = fmt.Sprintf(`<p><a href="%s" style="background:#6366F1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Book Now</a></p>`, bookingURL)
+	}
+	return fmt.Sprintf(`<div style="font-family:sans-serif;max-width:500px;margin:auto">
+<div style="background:linear-gradient(135deg,#6366F1,#EC4899);padding:32px;border-radius:16px 16px 0 0;color:white">
+<h2 style="margin:0">%s</h2></div>
+<div style="background:#fff;padding:32px;border:1px solid #E5E7EB;border-top:none;border-radius:0 0 16px 16px">
+<p>Hi <strong>%s</strong>,</p><p>%s</p>%s
+<p style="color:#6B7280;font-size:13px">With love, the <strong>%s</strong> team 🌸</p>
+</div></div>`, title, clientName, detail, cta, salonName)
 }
 
 func expiryEmailHTML(title, clientName, salonName, itemName, itemType string, days int, expiresAt time.Time) string {

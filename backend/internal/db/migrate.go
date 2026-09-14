@@ -805,6 +805,38 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 
+	if err := migrateWhatsAppTracking(db); err != nil {
+		return fmt.Errorf("whatsapp_messages table: %w", err)
+	}
+
 	slog.Info("database migrations applied")
 	return nil
+}
+
+// ── WhatsApp message tracking ─────────────────────────────────────────────────
+func migrateWhatsAppTracking(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS whatsapp_messages (
+			id                  BIGINT PRIMARY KEY AUTO_INCREMENT,
+			salon_id            INT NOT NULL,
+			client_id           INT NULL,
+			phone               VARCHAR(30) NOT NULL,
+			message_type        VARCHAR(60) NOT NULL
+			                    COMMENT 'booking_confirmation|reminder_24h|cancellation|reschedule|rebooking_reminder|service_due|inactive_customer|package_balance|empty_slot|birthday|membership_expiry_7d|package_expiry_7d|campaign',
+			campaign_id         INT NULL,
+			tracking_token      VARCHAR(64) NOT NULL UNIQUE,
+			redirect_url        VARCHAR(1000) NOT NULL DEFAULT '',
+			sent_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			clicked_at          TIMESTAMP NULL,
+			converted_at        TIMESTAMP NULL,
+			conversion_type     VARCHAR(30) NULL COMMENT 'booking|transaction',
+			conversion_id       BIGINT NULL,
+			revenue_attributed  DECIMAL(10,2) NULL,
+			INDEX idx_wa_salon   (salon_id),
+			INDEX idx_wa_client  (client_id),
+			INDEX idx_wa_token   (tracking_token),
+			INDEX idx_wa_type    (salon_id, message_type),
+			INDEX idx_wa_sent    (salon_id, sent_at)
+		)`)
+	return err
 }

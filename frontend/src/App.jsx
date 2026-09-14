@@ -39,6 +39,7 @@ import Products from '@/pages/Products'
 import ClientSegments from '@/pages/ClientSegments'
 import CustomerReview from '@/pages/CustomerReview'
 import Reports from '@/pages/Reports'
+import WhatsAppDashboard from '@/pages/WhatsAppDashboard'
 import Purchases from '@/pages/Purchases'
 import NewPurchaseOrder from '@/pages/NewPurchaseOrder'
 import Suppliers from '@/pages/Suppliers'
@@ -127,6 +128,7 @@ export default function App() {
               <Route path="optimizer"         element={<Optimizer />} />
               <Route path="forms"            element={<Forms />} />
               <Route path="reports"      element={<Reports />} />
+              <Route path="whatsapp"    element={<WhatsAppDashboard />} />
               <Route path="purchases"           element={<Purchases />} />
               <Route path="purchases/new-order" element={<NewPurchaseOrder />} />
               <Route path="suppliers"   element={<Suppliers />} />

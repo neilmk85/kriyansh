@@ -8,12 +8,7 @@ import (
 	"salonos/internal/notify"
 )
 
-// RunReminderLoop ticks every 60 s and dispatches all automated notifications:
-//   - T-24h appointment reminders
-//   - T-3h appointment reminders
-//   - Membership expiring in 7 days
-//   - Package expiring in 7 days
-//   - Birthday greetings (today)
+// RunReminderLoop ticks every 60 s and dispatches all automated notifications.
 func (a *App) RunReminderLoop(ctx context.Context) {
 	for {
 		select {
@@ -23,6 +18,8 @@ func (a *App) RunReminderLoop(ctx context.Context) {
 			a.sendAppointmentReminders(ctx)
 			a.sendExpiryAlerts(ctx)
 			a.sendBirthdayGreetings(ctx)
+			a.sendRebookingReminders(ctx)
+			a.sendInactiveCustomerAlerts(ctx)
 		}
 	}
 }
@@ -228,5 +225,118 @@ func (a *App) sendBirthdayGreetings(ctx context.Context) {
 		a.DB.ExecContext(ctx, `INSERT INTO sms_jobs (salon_id, client_id, job_type, phone, status) VALUES (?,?,?,?,'sent')`,
 			salonID, clientID, "birthday", phone)
 		slog.Info("birthday greeting sent", "client_id", clientID)
+	}
+}
+
+// ── Rebooking reminder (last visit >30 days, no future booking) ──────────────
+
+func (a *App) sendRebookingReminders(ctx context.Context) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT c.id, c.salon_id,
+		       c.first_name, COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(s.name,'our services'), DATEDIFF(NOW(), c.last_visit_at)
+		FROM clients c
+		LEFT JOIN (
+		    SELECT a.client_id, sv.name
+		    FROM appointments a
+		    JOIN appointment_services aps ON aps.appointment_id = a.id
+		    JOIN services sv ON sv.id = aps.service_id
+		    WHERE a.start_at = (
+		        SELECT MAX(a2.start_at) FROM appointments a2
+		        WHERE a2.client_id = a.client_id AND a2.status = 'completed'
+		    )
+		    GROUP BY a.client_id, sv.name
+		    LIMIT 1
+		) s ON s.client_id = c.id
+		WHERE c.is_active = 1
+		  AND c.last_visit_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
+		  AND c.last_visit_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM appointments a2
+		      WHERE a2.client_id = c.id AND a2.start_at > NOW()
+		        AND a2.status NOT IN ('cancelled','no_show')
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM sms_jobs sj
+		      WHERE sj.client_id = c.id AND sj.job_type = 'rebooking_reminder'
+		        AND DATE(sj.sent_at) = CURDATE()
+		  )
+	`)
+	if err != nil {
+		slog.Error("rebooking reminder query failed", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var clientID, salonID int64
+		var info notify.RetentionInfo
+		if err := rows.Scan(&clientID, &salonID, &info.ClientName, &info.Phone, &info.Email, &info.ServiceName, &info.DaysSince); err != nil {
+			continue
+		}
+		if info.Phone == "" {
+			continue
+		}
+		info.BookingURL = a.AppURL + "/booking"
+		a.Notifier.NotifyRebookingReminder(info)
+		a.DB.ExecContext(ctx, `INSERT INTO sms_jobs (salon_id, client_id, job_type, phone, status) VALUES (?,?,?,?,'sent')`,
+			salonID, clientID, "rebooking_reminder", info.Phone)
+		slog.Info("rebooking reminder sent", "client_id", clientID)
+	}
+}
+
+// ── Inactive customer alert (last visit >60 days) ────────────────────────────
+
+func (a *App) sendInactiveCustomerAlerts(ctx context.Context) {
+	rows, err := a.DB.QueryContext(ctx, `
+		SELECT c.id, c.salon_id,
+		       c.first_name, COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(s.name,'our services'), DATEDIFF(NOW(), c.last_visit_at)
+		FROM clients c
+		LEFT JOIN (
+		    SELECT a.client_id, sv.name
+		    FROM appointments a
+		    JOIN appointment_services aps ON aps.appointment_id = a.id
+		    JOIN services sv ON sv.id = aps.service_id
+		    WHERE a.start_at = (
+		        SELECT MAX(a2.start_at) FROM appointments a2
+		        WHERE a2.client_id = a.client_id AND a2.status = 'completed'
+		    )
+		    GROUP BY a.client_id, sv.name
+		    LIMIT 1
+		) s ON s.client_id = c.id
+		WHERE c.is_active = 1
+		  AND c.last_visit_at < DATE_SUB(NOW(), INTERVAL 60 DAY)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM appointments a2
+		      WHERE a2.client_id = c.id AND a2.start_at > NOW()
+		        AND a2.status NOT IN ('cancelled','no_show')
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM sms_jobs sj
+		      WHERE sj.client_id = c.id AND sj.job_type = 'inactive_customer'
+		        AND sj.sent_at > DATE_SUB(NOW(), INTERVAL 90 DAY)
+		  )
+	`)
+	if err != nil {
+		slog.Error("inactive customer query failed", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var clientID, salonID int64
+		var info notify.RetentionInfo
+		if err := rows.Scan(&clientID, &salonID, &info.ClientName, &info.Phone, &info.Email, &info.ServiceName, &info.DaysSince); err != nil {
+			continue
+		}
+		if info.Phone == "" {
+			continue
+		}
+		info.BookingURL = a.AppURL + "/booking"
+		a.Notifier.NotifyInactiveCustomer(info)
+		a.DB.ExecContext(ctx, `INSERT INTO sms_jobs (salon_id, client_id, job_type, phone, status) VALUES (?,?,?,?,'sent')`,
+			salonID, clientID, "inactive_customer", info.Phone)
+		slog.Info("inactive customer alert sent", "client_id", clientID)
 	}
 }

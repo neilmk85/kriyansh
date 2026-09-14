@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -142,12 +145,10 @@ func (a *App) SendCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get campaign
-	var segment string
-	var status string
+	var segment, channel, message string
 	err = a.DB.QueryRowContext(r.Context(),
-		`SELECT segment, status FROM marketing_campaigns WHERE id=? AND salon_id=?`,
-		id, claims.SalonID).Scan(&segment, &status)
+		`SELECT segment, channel, message FROM marketing_campaigns WHERE id=? AND salon_id=?`,
+		id, claims.SalonID).Scan(&segment, &channel, &message)
 	if err == sql.ErrNoRows {
 		a.Error(w, http.StatusNotFound, "campaign not found")
 		return
@@ -157,51 +158,88 @@ func (a *App) SendCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get segment count by reusing the same logic
-	var count int
-	switch segment {
-	case "all":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients WHERE salon_id=? AND is_active=1`, claims.SalonID).Scan(&count)
-	case "vip":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients
-			 WHERE salon_id=? AND is_active=1
-			   AND total_spend > (SELECT AVG(total_spend)*2 FROM clients WHERE salon_id=?)`,
-			claims.SalonID, claims.SalonID).Scan(&count)
-	case "at_risk":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients
-			 WHERE salon_id=? AND is_active=1
-			   AND last_visit_at IS NOT NULL
-			   AND last_visit_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
-			   AND last_visit_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)`,
-			claims.SalonID).Scan(&count)
-	case "lapsed":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients
-			 WHERE salon_id=? AND is_active=1
-			   AND last_visit_at < DATE_SUB(NOW(), INTERVAL 60 DAY)`,
-			claims.SalonID).Scan(&count)
-	case "new":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients
-			 WHERE salon_id=? AND is_active=1 AND total_visits <= 2`,
-			claims.SalonID).Scan(&count)
-	case "regular":
-		a.DB.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM clients
-			 WHERE salon_id=? AND is_active=1 AND total_visits > 2`,
-			claims.SalonID).Scan(&count)
-	}
-
-	now := time.Now().UTC()
-	_, err = a.DB.ExecContext(r.Context(),
-		`UPDATE marketing_campaigns SET status='sent', sent_count=?, sent_at=? WHERE id=? AND salon_id=?`,
-		count, now, id, claims.SalonID)
+	clients, err := a.segmentClients(r.Context(), claims.SalonID, segment)
 	if err != nil {
-		a.Error(w, http.StatusInternalServerError, "db error")
+		a.Error(w, http.StatusInternalServerError, "segment query failed")
 		return
 	}
-	a.JSON(w, http.StatusOK, map[string]any{"sent": true, "sent_count": count})
+
+	go a.dispatchCampaign(context.Background(), claims.SalonID, uint64(id), channel, message, clients)
+
+	now := time.Now().UTC()
+	a.DB.ExecContext(r.Context(),
+		`UPDATE marketing_campaigns SET status='sent', sent_count=?, sent_at=? WHERE id=? AND salon_id=?`,
+		len(clients), now, id, claims.SalonID)
+
+	a.JSON(w, http.StatusOK, map[string]any{"sent": true, "sent_count": len(clients)})
+}
+
+type campaignClient struct {
+	id    uint
+	name  string
+	phone string
+	email string
+}
+
+func (a *App) segmentClients(ctx context.Context, salonID uint, segment string) ([]campaignClient, error) {
+	var q string
+	var args []any
+	switch segment {
+	case "vip":
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != ''
+			   AND total_spend > (SELECT AVG(total_spend)*2 FROM clients WHERE salon_id=?)`
+		args = []any{salonID, salonID}
+	case "at_risk":
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != ''
+			   AND last_visit_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
+			   AND last_visit_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)`
+		args = []any{salonID}
+	case "lapsed":
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != ''
+			   AND last_visit_at < DATE_SUB(NOW(), INTERVAL 60 DAY)`
+		args = []any{salonID}
+	case "new":
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != '' AND total_visits <= 2`
+		args = []any{salonID}
+	case "regular":
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != '' AND total_visits > 2`
+		args = []any{salonID}
+	default: // "all"
+		q = `SELECT id, first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients
+			 WHERE salon_id=? AND is_active=1 AND phone != ''`
+		args = []any{salonID}
+	}
+	rows, err := a.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []campaignClient
+	for rows.Next() {
+		var c campaignClient
+		rows.Scan(&c.id, &c.name, &c.phone, &c.email)
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (a *App) dispatchCampaign(ctx context.Context, salonID uint, campaignID uint64, channel, message string, clients []campaignClient) {
+	bookingURL := a.AppURL + "/booking"
+	for _, c := range clients {
+		_, trackURL := a.trackWASend(ctx, salonID, &c.id, c.phone, "campaign", bookingURL)
+		// Embed tracking link if message contains {link} placeholder, else append
+		var msg string
+		if strings.Contains(message, "{link}") {
+			msg = strings.ReplaceAll(message, "{link}", trackURL)
+		} else {
+			msg = message + "\n\n" + trackURL
+		}
+		a.Notifier.NotifyCampaign(c.name, c.phone, msg)
+	}
+	slog.Info("campaign dispatched", "campaign_id", campaignID, "recipients", len(clients))
 }

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -553,10 +555,28 @@ func (a *App) RedeemPackageService(w http.ResponseWriter, r *http.Request) {
 		a.DB.ExecContext(r.Context(), `UPDATE client_packages SET status='exhausted' WHERE id=?`, body.ClientPackageID)
 	}
 
+	go a.notifyPackageBalance(context.Background(), claims.SalonID, body.ClientPackageID, remainingAfter)
+
 	a.JSON(w, http.StatusOK, map[string]any{
 		"redeemed":      true,
 		"remaining_qty": remainingAfter,
 	})
+}
+
+func (a *App) notifyPackageBalance(ctx context.Context, salonID uint, clientPackageID uint, remaining int) {
+	var clientName, phone, email, packageName string
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT c.first_name, COALESCE(c.phone,''), COALESCE(c.email,''), p.name
+		FROM client_packages cp
+		JOIN clients c ON c.id = cp.client_id
+		JOIN packages p ON p.id = cp.package_id
+		WHERE cp.id = ?`, clientPackageID,
+	).Scan(&clientName, &phone, &email, &packageName)
+	if err != nil || phone == "" {
+		slog.Warn("notifyPackageBalance: client lookup failed", "cp_id", clientPackageID, "error", err)
+		return
+	}
+	a.Notifier.NotifyPackageBalance(clientName, phone, email, packageName, remaining, a.AppURL+"/booking")
 }
 
 // ── ListClientPackageRedemptions — GET /api/clients/{id}/packages/history ──
