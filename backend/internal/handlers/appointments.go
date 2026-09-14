@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"salonos/internal/models"
+	"salonos/internal/notify"
 )
 
 // AppointmentCalendar returns per-day counts for a month: ?month=2026-06
@@ -274,6 +275,9 @@ func (a *App) CreateAppointment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notify client of booking confirmation in background
+	go a.notifyAppointmentBooked(context.Background(), apptID, req.ClientID)
+
 	a.JSON(w, http.StatusCreated, map[string]any{
 		"id":      apptID,
 		"message": "appointment created",
@@ -378,6 +382,9 @@ func (a *App) UpdateAppointmentStatus(w http.ResponseWriter, r *http.Request) {
 	a.logActivity(r.Context(), claims.SalonID, claims.UserID, "status_changed", "appointment", uint(id), map[string]any{"status": body.Status})
 	if body.Status == "cancelled" {
 		go a.TriggerGapFill(context.Background(), claims.SalonID, id)
+	}
+	if body.Status == "completed" {
+		go a.notifyAppointmentCompleted(context.Background(), int64(id))
 	}
 	if body.Status == "no_show" {
 		// Auto-capture deposit if a PaymentIntent was held and not yet charged
@@ -681,4 +688,78 @@ func (a *App) ListAppointmentsFull(w http.ResponseWriter, r *http.Request) {
 		list = append(list, r)
 	}
 	a.JSON(w, http.StatusOK, list)
+}
+
+// notifyAppointmentBooked fires a booking confirmation to the client.
+func (a *App) notifyAppointmentBooked(ctx context.Context, apptID int64, clientID uint) {
+	var info struct {
+		clientName  string
+		phone       string
+		email       string
+		serviceName string
+		staffName   string
+		startAt     time.Time
+	}
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT c.first_name,
+		       COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),'Appointment'),
+		       COALESCE(CONCAT(u.first_name,' ',u.last_name),''),
+		       a.start_at
+		FROM appointments a
+		JOIN clients c ON c.id = a.client_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
+		LEFT JOIN services s ON s.id = aps.service_id
+		LEFT JOIN staff_profiles sp ON sp.id = a.staff_id
+		LEFT JOIN users u ON u.id = sp.user_id
+		WHERE a.id = ?
+		GROUP BY c.first_name, c.phone, c.email, u.first_name, u.last_name, a.start_at
+	`, apptID).Scan(&info.clientName, &info.phone, &info.email, &info.serviceName, &info.staffName, &info.startAt)
+	if err != nil || info.phone == "" {
+		return
+	}
+	a.Notifier.NotifyAppointmentBooked(notifyApptInfo(info.clientName, info.phone, info.email, info.serviceName, info.staffName, info.startAt))
+}
+
+// notifyAppointmentCompleted fires a thank-you message when an appointment is marked completed.
+func (a *App) notifyAppointmentCompleted(ctx context.Context, apptID int64) {
+	var info struct {
+		clientName  string
+		phone       string
+		email       string
+		serviceName string
+		staffName   string
+		startAt     time.Time
+	}
+	err := a.DB.QueryRowContext(ctx, `
+		SELECT c.first_name,
+		       COALESCE(c.phone,''), COALESCE(c.email,''),
+		       COALESCE(GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', '),'Appointment'),
+		       COALESCE(CONCAT(u.first_name,' ',u.last_name),''),
+		       a.start_at
+		FROM appointments a
+		JOIN clients c ON c.id = a.client_id
+		LEFT JOIN appointment_services aps ON aps.appointment_id = a.id
+		LEFT JOIN services s ON s.id = aps.service_id
+		LEFT JOIN staff_profiles sp ON sp.id = a.staff_id
+		LEFT JOIN users u ON u.id = sp.user_id
+		WHERE a.id = ?
+		GROUP BY c.first_name, c.phone, c.email, u.first_name, u.last_name, a.start_at
+	`, apptID).Scan(&info.clientName, &info.phone, &info.email, &info.serviceName, &info.staffName, &info.startAt)
+	if err != nil || info.phone == "" {
+		return
+	}
+	a.Notifier.NotifyAppointmentCompleted(notifyApptInfo(info.clientName, info.phone, info.email, info.serviceName, info.staffName, info.startAt))
+}
+
+// notifyApptInfo builds a notify.ApptInfo from raw fields.
+func notifyApptInfo(clientName, phone, email, serviceName, staffName string, startAt time.Time) notify.ApptInfo {
+	return notify.ApptInfo{
+		ClientName:  clientName,
+		Phone:       phone,
+		Email:       email,
+		ServiceName: serviceName,
+		StaffName:   staffName,
+		StartAt:     startAt,
+	}
 }

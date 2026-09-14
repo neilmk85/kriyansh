@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"salonos/internal/notify"
 )
 
 // transactionItem is used in request and response bodies.
@@ -138,6 +140,11 @@ func (a *App) CreateTransaction(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"id":         txnID,
 		"created_at": time.Now().UTC(),
+	}
+
+	// Notify client of payment receipt in background
+	if req.ClientID != nil && req.GrandTotal > 0 {
+		go a.notifyPaymentReceived(context.Background(), *req.ClientID, req.GrandTotal, req.Items)
 	}
 
 	// Auto-award loyalty points when a client is attached
@@ -417,5 +424,29 @@ func (a *App) SendPaymentLink(w http.ResponseWriter, r *http.Request) {
 	a.JSON(w, http.StatusOK, map[string]any{
 		"sent":  true,
 		"phone": phone.String,
+	})
+}
+
+// notifyPaymentReceived sends a payment receipt to the client.
+func (a *App) notifyPaymentReceived(ctx context.Context, clientID uint, grandTotal float64, items []transactionItem) {
+	var clientName, phone, email string
+	if err := a.DB.QueryRowContext(ctx,
+		`SELECT first_name, COALESCE(phone,''), COALESCE(email,'') FROM clients WHERE id=?`, clientID,
+	).Scan(&clientName, &phone, &email); err != nil || phone == "" {
+		return
+	}
+	serviceName := "Service"
+	for _, it := range items {
+		if it.Name != "" {
+			serviceName = it.Name
+			break
+		}
+	}
+	a.Notifier.NotifyPaymentReceived(notify.TxnInfo{
+		ClientName:  clientName,
+		Phone:       phone,
+		Email:       email,
+		GrandTotal:  grandTotal,
+		ServiceName: serviceName,
 	})
 }
