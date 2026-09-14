@@ -35,13 +35,23 @@ func scanClient(rows interface {
 
 func (a *App) ListClients(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
-	q := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
+	qv := r.URL.Query()
+	q := "%" + strings.TrimSpace(qv.Get("q")) + "%"
+	limit := 500
+	if l := qv.Get("limit"); l != "" {
+		if n, err := fmt.Sscanf(l, "%d", &limit); n != 1 || err != nil || limit < 1 {
+			limit = 500
+		}
+		if limit > 2000 {
+			limit = 2000
+		}
+	}
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT `+clientSelectCols+`
+		fmt.Sprintf(`SELECT `+clientSelectCols+`
 		 FROM clients
 		 WHERE salon_id=? AND is_active=1
 		   AND (first_name LIKE ? OR last_name LIKE ? OR phone LIKE ? OR email LIKE ?)
-		 ORDER BY created_at DESC LIMIT 500`, claims.SalonID, q, q, q, q)
+		 ORDER BY created_at DESC LIMIT %d`, limit), claims.SalonID, q, q, q, q)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
 		return

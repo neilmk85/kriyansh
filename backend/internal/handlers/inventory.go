@@ -40,12 +40,17 @@ type inventoryItem struct {
 
 func (a *App) ListInventory(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
+	lowStock := r.URL.Query().Get("low_stock") == "true" || r.URL.Query().Get("low_stock") == "1"
+	whereExtra := ""
+	if lowStock {
+		whereExtra = " AND stock_qty <= low_stock_threshold"
+	}
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT id, salon_id, name, COALESCE(category,''), COALESCE(sku,''),
 		        COALESCE(supplier,''), COALESCE(image_url,''),
 		        unit, cost_price, retail_price, stock_qty, low_stock_threshold, is_active, created_at
 		 FROM inventory_items
-		 WHERE salon_id=? AND is_active=1
+		 WHERE salon_id=? AND is_active=1`+whereExtra+`
 		 ORDER BY created_at DESC`, claims.SalonID)
 	if err != nil {
 		a.Error(w, http.StatusInternalServerError, "db error")
