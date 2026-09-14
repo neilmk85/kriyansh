@@ -1661,7 +1661,7 @@ export default function Kiosk() {
   const handleCheckoutPhoneNext = async () => {
     setCheckoutLoading(true)
     try {
-      const res = await fetch(`/api/public/appointments/current?phone=${phone}`)
+      const res = await fetch(`/api/v1/public/appointments/current?phone=${phone}`)
       if (res.ok) {
         const data = await res.json()
         if (data) {
@@ -1689,7 +1689,7 @@ export default function Kiosk() {
     if (!checkoutAppt) return
     setBookingNext(true)
     try {
-      const res = await fetch(`/api/public/appointments/${checkoutAppt.id}/book-next`, { method: 'POST' })
+      const res = await fetch(`/api/v1/public/appointments/${checkoutAppt.id}/book-next`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         setNextBooked({
@@ -1713,8 +1713,8 @@ export default function Kiosk() {
       setApptLoading(true)
       // Look up customer name alongside appointments
       const [apptRes, lookupRes] = await Promise.allSettled([
-        fetch(`/api/public/appointments/today?phone=${phone}`),
-        fetch(`/api/public/walkin/lookup?phone=${phone}`),
+        fetch(`/api/v1/public/appointments/today?phone=${phone}`),
+        fetch(`/api/v1/public/walkin/lookup?phone=${phone}`),
       ])
       let fetchedLookup = null
       if (lookupRes.status === 'fulfilled' && lookupRes.value.ok) {
@@ -1738,7 +1738,7 @@ export default function Kiosk() {
     // walkin mode
     setLookupLoading(true)
     try {
-      const res = await fetch(`/api/public/walkin/lookup?phone=${phone}`)
+      const res = await fetch(`/api/v1/public/walkin/lookup?phone=${phone}`)
       if (res.ok) {
         const data = await res.json()
         setLookup(data)
@@ -1766,7 +1766,7 @@ export default function Kiosk() {
   // Appointment check-in
   const handleAppointmentCheckin = async (appt) => {
     try {
-      const res = await fetch(`/api/public/appointments/${appt.id}/checkin`, { method: 'POST' })
+      const res = await fetch(`/api/v1/public/appointments/${appt.id}/checkin`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json().catch(() => ({}))
         setCheckedInName(appt.client_name || '')

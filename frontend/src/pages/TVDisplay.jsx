@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 const styles = {
   page: {
@@ -205,7 +204,7 @@ function useQueue() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/public/queue`)
+      const res = await fetch('/api/v1/public/queue')
       if (!res.ok) return
       const data = await res.json()
       setQueue(Array.isArray(data) ? data : [])
