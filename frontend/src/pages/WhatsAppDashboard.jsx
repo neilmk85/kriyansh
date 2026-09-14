@@ -50,7 +50,7 @@ export default function WhatsAppDashboard() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['wa-performance', days],
-    queryFn: () => api.get(`/api/v1/whatsapp/performance?days=${days}`).then(r => r.data),
+    queryFn: () => api.get(`/whatsapp/performance?days=${days}`).then(r => r.data),
     staleTime: 60_000,
   })
 

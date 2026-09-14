@@ -40,7 +40,7 @@ function MilestoneTimeline({ milestones, journeyID, onUpdated }) {
 
   const update = useMutation({
     mutationFn: ({ mid, status }) =>
-      api.patch(`/api/v1/bridal/${journeyID}/milestones/${mid}`, { status }).then(r => r.data),
+      api.patch(`/bridal/${journeyID}/milestones/${mid}`, { status }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bridal', journeyID] })
       qc.invalidateQueries({ queryKey: ['bridal-list'] })
@@ -147,13 +147,13 @@ function MilestoneTimeline({ milestones, journeyID, onUpdated }) {
 function JourneyDetail({ journeyId, onClose }) {
   const { data, isLoading } = useQuery({
     queryKey: ['bridal', journeyId],
-    queryFn: () => api.get(`/api/v1/bridal/${journeyId}`).then(r => r.data),
+    queryFn: () => api.get(`/bridal/${journeyId}`).then(r => r.data),
     enabled: !!journeyId,
   })
   const qc = useQueryClient()
 
   const cancel = useMutation({
-    mutationFn: () => api.patch(`/api/v1/bridal/${journeyId}/cancel`).then(r => r.data),
+    mutationFn: () => api.patch(`/bridal/${journeyId}/cancel`).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bridal-list'] })
       qc.invalidateQueries({ queryKey: ['bridal', journeyId] })
@@ -244,12 +244,12 @@ function CreateModal({ onClose }) {
 
   const { data: clients } = useQuery({
     queryKey: ['clients-search', clientSearch],
-    queryFn: () => api.get(`/api/v1/clients?q=${encodeURIComponent(clientSearch)}`).then(r => r.data),
+    queryFn: () => api.get(`/clients?q=${encodeURIComponent(clientSearch)}`).then(r => r.data),
     enabled: clientSearch.length >= 2,
   })
 
   const create = useMutation({
-    mutationFn: () => api.post('/api/v1/bridal', {
+    mutationFn: () => api.post('/bridal', {
       client_id: selectedClient.id,
       wedding_date: weddingDate,
       notes,
@@ -434,7 +434,7 @@ export default function BridalJourneys() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['bridal-list'],
-    queryFn: () => api.get('/api/v1/bridal').then(r => r.data),
+    queryFn: () => api.get('/bridal').then(r => r.data),
   })
 
   const filtered = (data ?? []).filter(j =>

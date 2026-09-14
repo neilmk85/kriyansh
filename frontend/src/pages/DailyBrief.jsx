@@ -195,13 +195,13 @@ export default function DailyBrief() {
 
   const { data: today, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['brief-daily'],
-    queryFn: () => api.get('/api/v1/brief/daily').then(r => r.data),
+    queryFn: () => api.get('/brief/daily').then(r => r.data),
     staleTime: 5 * 60_000,
   })
 
   const { data: history = [] } = useQuery({
     queryKey: ['brief-history'],
-    queryFn: () => api.get('/api/v1/brief/history').then(r => r.data),
+    queryFn: () => api.get('/brief/history').then(r => r.data),
     staleTime: 10 * 60_000,
   })
 
