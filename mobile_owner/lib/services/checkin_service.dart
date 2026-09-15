@@ -1,10 +1,11 @@
 import '../models/checkin.dart';
+import 'api_service.dart';
 
 // Service layer — swap the mock implementations for real HTTP calls
 // once auth token storage is wired up.
 class CheckinService {
   // ignore: unused_field
-  static const _baseUrl = 'http://localhost:8080';
+  static const _baseUrl = ApiService.baseUrl;
 
   // Fetch all pending check-ins (appointments checked_in + walk-ins waiting).
   static Future<List<PendingCheckin>> fetchPending() async {

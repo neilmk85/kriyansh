@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 class ApiException implements Exception {
@@ -14,12 +12,10 @@ class ApiException implements Exception {
 class ApiService {
   ApiService._();
 
-  // Same backend as the salon admin app (kriyansh/backend).
-  // Use 10.0.2.2 for Android emulator; localhost for iOS sim / web.
-  static String get baseUrl {
-    if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:8080';
-    return 'http://localhost:8080';
-  }
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://app.kriyanshbeautybar.com',
+  );
 
   static String? _token;
   static void setToken(String token) => _token = token;
